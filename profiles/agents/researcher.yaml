@@ -27,5 +27,7 @@ tools:
   allowlist:
     - web.search
     - web.fetch
+    - read_pdf
+    - read_docx
 
 autonomy: assisted

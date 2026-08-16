@@ -22,6 +22,8 @@ tools:
     - read_file
     - write_file
     - delete_file
+    - read_pdf
+    - read_docx
 
 autonomy: supervised
 

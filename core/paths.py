@@ -86,6 +86,14 @@ def open_no_follow_read(blessed: str | os.PathLike):
     return os.fdopen(fd, "r", encoding="utf-8")
 
 
+def open_no_follow_read_bytes(blessed: str | os.PathLike):
+    """Binary twin of ``open_no_follow_read`` (same re-verify + no-follow
+    guard) for tools that parse binary formats (PDF, docx)."""
+    _reverify(blessed)
+    fd = os.open(str(blessed), os.O_RDONLY | _O_NOFOLLOW | _O_BINARY)
+    return os.fdopen(fd, "rb")
+
+
 def open_no_follow_write(blessed: str | os.PathLike):
     """Open a gate-blessed path for text writing (create/truncate),
     refusing symlinks."""

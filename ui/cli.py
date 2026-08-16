@@ -24,6 +24,7 @@ from core.session import new_session
 from llm.anthropic import AnthropicAdapter
 from memory import adapter_for
 from tools.registry import ToolRegistry
+from tools.builtins.documents import ReadDocxTool, ReadPdfTool
 from tools.builtins.files import DeleteFileTool, ReadFileTool, WriteFileTool
 
 InputFn = Callable[[str], str]
@@ -35,6 +36,8 @@ def build_registry() -> ToolRegistry:
     registry.register(ReadFileTool())
     registry.register(WriteFileTool())
     registry.register(DeleteFileTool())
+    registry.register(ReadPdfTool())
+    registry.register(ReadDocxTool())
     return registry
 
 

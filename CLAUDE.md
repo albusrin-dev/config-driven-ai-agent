@@ -23,10 +23,14 @@ today) switches on identity: a pure, name-agnostic system-prompt assembler
 capability/autonomy summary + the Rule 12 reminder, stored on the session
 and prepended to every LLM call outside the windowed conversation; the
 context budget is now derived from the model window unless overridden; CI
-is wired for the POSIX no-follow gate. No persistent / cross-session
-memory, no retrieval, no LLM summarization, no network/web or shell
-tools, no planning, no events, voice, browser, workflows, skills, MCP, or
-rich UI until their phases arrive.
+is wired for the POSIX no-follow gate. Phase 5 (this codebase today) adds
+document reading: `read_pdf` and `read_docx` — read-only, sandbox-
+confined through the same FilesystemEffect/no-follow path as `read_file`,
+size-capped with a truncation marker, returning extracted text as Rule 12
+untrusted data. No document writing, no OCR, no spreadsheets, no
+persistent / cross-session memory, no retrieval, no LLM summarization, no
+network/web or shell tools, no planning, no events, voice, browser,
+workflows, skills, MCP, or rich UI until their phases arrive.
 
 ## Durable Project Rules (all phases)
 
@@ -79,6 +83,12 @@ rich UI until their phases arrive.
 ## Dev notes
 
 - Python 3.11+, Pydantic v2, PyYAML, pytest. Local venv at `.venv`.
+  Document extraction (Phase 5) adds the first third-party parsing deps:
+  `pypdf` + `python-docx`, pinned in `pyproject.toml` and installed in CI.
+  Parsing is sealed inside `tools/builtins/documents.py`; extraction is
+  bounded (`MAX_EXTRACT_CHARS` truncate-with-marker, `MAX_DOCUMENT_BYTES`
+  pre-parse guard) and errors (corrupt/encrypted/scanned) come back as
+  clean error results, never crashes.
 - Run tests: `.venv\Scripts\python.exe -m pytest`
 - Agent profiles live in `profiles/agents/{name}.yaml`; system configs in
   `profiles/system/{env}.yaml` (selected via `APP_ENV`, default `dev`);
