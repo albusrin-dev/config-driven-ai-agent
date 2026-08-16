@@ -5,6 +5,7 @@ from .errors import (
     ConfigValidationError,
     MissingSecretError,
     ProfileNotFoundError,
+    UnsafeProfileNameError,
 )
 from .loader import LoadedConfig, load_agent, load_system_config, load_user_config
 from .models import (
@@ -43,6 +44,7 @@ __all__ = [
     "SystemConfig",
     "ToolsConfig",
     "ToolOverride",
+    "UnsafeProfileNameError",
     "UserConfig",
     "load_agent",
     "load_system_config",

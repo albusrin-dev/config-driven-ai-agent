@@ -20,6 +20,23 @@ class ProfileNotFoundError(ConfigError):
         self.path = path
 
 
+class UnsafeProfileNameError(ConfigError):
+    """A profile/environment name is path-like or otherwise unsafe.
+
+    Raised BEFORE any filesystem access. Names must match
+    ``^[a-z0-9][a-z0-9_-]*$`` — lowercase letters, digits, hyphen,
+    underscore; no separators, no traversal, no absolute paths.
+    """
+
+    def __init__(self, name: object) -> None:
+        super().__init__(
+            f"Unsafe profile/environment name {name!r}: names must match "
+            f"^[a-z0-9][a-z0-9_-]*$ (lowercase letters, digits, '-', '_'). "
+            f"Path separators, '..', and absolute paths are rejected."
+        )
+        self.name = name
+
+
 class ConfigValidationError(ConfigError):
     """A config file failed schema or cross-validation.
 

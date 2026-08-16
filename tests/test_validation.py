@@ -22,12 +22,12 @@ llm:
 """
 
 
-def _load_broken(tmp_path, system_config, yaml_text, filename="broken.yaml"):
-    path = write_yaml(tmp_path, filename, yaml_text)
+def _load_broken(tmp_path, system_config, yaml_text, name="broken"):
+    write_yaml(tmp_path, f"{name}.yaml", yaml_text)
     with pytest.raises(ConfigValidationError) as exc_info:
-        load_agent(path, system_config)
+        load_agent(name, system_config, base_dir=tmp_path)
     err = exc_info.value
-    assert str(path) in str(err)  # message names the file
+    assert f"{name}.yaml" in str(err)  # message names the file
     return err
 
 
@@ -86,9 +86,9 @@ tools:
 
 
 def test_invalid_env_enum(tmp_path):
-    path = write_yaml(
+    write_yaml(
         tmp_path,
-        "sys.yaml",
+        "sysbad.yaml",
         """
 env: production
 providers:
@@ -96,7 +96,7 @@ providers:
 """,
     )
     with pytest.raises(ConfigValidationError) as exc_info:
-        load_system_config(path)
+        load_system_config("sysbad", base_dir=tmp_path)
     msg = str(exc_info.value)
     assert "env" in msg
     assert "allowed values" in msg

@@ -1,8 +1,12 @@
-"""In-memory secrets, resolved from the environment at load time.
+"""Secret REFERENCES, resolved from the environment on demand.
 
-``Secrets`` is deliberately NOT a Pydantic model and is never a field on any
-config model, so no config dump/serialization can ever contain a secret
-value (Durable Rule 4). Its repr is redacted.
+The long-lived config bundle never holds a secret value: ``Secrets`` stores
+only provider -> env-var NAME. Presence is validated at load time (early,
+clear ``MissingSecretError``), and ``resolve_secret(provider)`` reads the
+env var at the point of use (the LLM adapter will call it in a later
+phase). The guarantee is structural — the value isn't in the object — so no
+``asdict``/``model_dump``/``json.dumps`` of the bundle can ever carry a
+key. The redacted-style ``__repr__`` remains as defence in depth.
 """
 
 from __future__ import annotations
@@ -14,42 +18,52 @@ from .models import AgentConfig, SystemConfig
 
 
 class Secrets:
-    """Provider name -> resolved API key. In-memory only; never serialized."""
+    """Provider name -> env var NAME. Values are never stored."""
 
-    def __init__(self, values: dict[str, str] | None = None) -> None:
-        self._values: dict[str, str] = dict(values or {})
+    def __init__(self, references: dict[str, str] | None = None) -> None:
+        self._references: dict[str, str] = dict(references or {})
 
-    def get(self, provider: str) -> str:
-        return self._values[provider]
+    def references(self) -> dict[str, str]:
+        """Copy of the provider -> env-var-name mapping (names only)."""
+        return dict(self._references)
+
+    def resolve_secret(self, provider: str) -> str:
+        """Read the provider's key from the environment NOW.
+
+        Raises ``KeyError`` for a provider with no reference, and
+        ``MissingSecretError`` if the env var is unset/empty at call time.
+        """
+        env_var = self._references[provider]
+        value = os.environ.get(env_var)
+        if not value:
+            raise MissingSecretError(provider, env_var)
+        return value
 
     def __contains__(self, provider: str) -> bool:
-        return provider in self._values
+        return provider in self._references
 
     def providers(self) -> list[str]:
-        return sorted(self._values)
+        return sorted(self._references)
 
-    def __repr__(self) -> str:  # never leak values through logging/repr
-        return f"Secrets(providers={self.providers()}, values=<redacted>)"
+    def __repr__(self) -> str:  # names only — there are no values to leak
+        return f"Secrets(references={self._references!r}, values=<resolved on demand>)"
 
     __str__ = __repr__
 
 
 def resolve_secrets(agent: AgentConfig, system: SystemConfig) -> Secrets:
-    """Resolve the agent's provider key from the environment.
+    """Validate presence of the agent's provider key and build references.
 
-    The provider's ``api_key_env`` names the env var; the value is read here
-    and lives only in the returned ``Secrets`` object. A provider without
-    ``api_key_env`` (keyless local provider) resolves to no entry.
-
-    Raises ``MissingSecretError`` if a required env var is unset or empty.
+    Fails at load with ``MissingSecretError`` if a required env var is
+    unset/empty, but stores only the env var NAME. A provider without
+    ``api_key_env`` (keyless local provider) yields no reference.
     """
     provider_name = agent.llm.provider
     provider = system.providers[provider_name]  # existence cross-validated by loader
 
-    values: dict[str, str] = {}
+    references: dict[str, str] = {}
     if provider.api_key_env is not None:
-        value = os.environ.get(provider.api_key_env)
-        if not value:
+        if not os.environ.get(provider.api_key_env):
             raise MissingSecretError(provider_name, provider.api_key_env)
-        values[provider_name] = value
-    return Secrets(values)
+        references[provider_name] = provider.api_key_env
+    return Secrets(references)

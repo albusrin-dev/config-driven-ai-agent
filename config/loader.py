@@ -1,21 +1,26 @@
 """Load, validate, and cross-validate config profiles.
 
-Path resolution from an agent name is pure string interpolation — the name
-is an opaque identifier and is never branched on (Durable Rule 2). YAML is
-parsed with ``yaml.safe_load`` only; nothing from a config file is ever
-executed (Durable Rule 1).
+Profiles are loaded by NAME only. A name is an opaque identifier (never
+branched on, Durable Rule 2) constrained to a safe pattern and resolved to
+``{base_dir}/{name}.yaml``; the resolved path is then confined to the base
+directory via the shared helper in ``core.paths`` (defence in depth against
+traversal). YAML is parsed with ``yaml.safe_load`` only; nothing from a
+config file is ever executed (Durable Rule 1).
 """
 
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, ValidationError
 
-from .errors import ConfigValidationError, ProfileNotFoundError
+from core.paths import PathEscapeError, confine
+
+from .errors import ConfigValidationError, ProfileNotFoundError, UnsafeProfileNameError
 from .models import (
     AUTONOMY_RANK,
     AgentConfig,
@@ -25,17 +30,36 @@ from .models import (
 from .secrets import Secrets, resolve_secrets
 
 PROFILES_DIR = Path(__file__).resolve().parent.parent / "profiles"
+AGENTS_DIR = PROFILES_DIR / "agents"
+SYSTEM_DIR = PROFILES_DIR / "system"
+USERS_DIR = PROFILES_DIR / "users"
+
+# Safe profile/environment names: no separators, no dots, no traversal.
+_SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 
 @dataclass(frozen=True)
 class LoadedConfig:
-    """Validated config bundle. Secrets are a separate object, never a
-    field on any config model."""
+    """Validated config bundle. Secrets are a separate object holding only
+    env-var references — never values — and are never serialized."""
 
     agent: AgentConfig
     system: SystemConfig
     secrets: Secrets = field(repr=False)
     user: UserConfig | None = None
+
+
+# --------------------------------------------------------------------------
+# Name -> path resolution (A1: safe pattern + confinement)
+# --------------------------------------------------------------------------
+
+def _resolve_profile_path(name: str, base_dir: Path) -> Path:
+    if not isinstance(name, str) or not _SAFE_NAME.fullmatch(name):
+        raise UnsafeProfileNameError(name)
+    try:
+        return confine(Path(base_dir) / f"{name}.yaml", base_dir)
+    except PathEscapeError:
+        raise UnsafeProfileNameError(name) from None
 
 
 # --------------------------------------------------------------------------
@@ -113,24 +137,16 @@ def _cross_validate(agent: AgentConfig, system: SystemConfig, source: str) -> No
 
 
 # --------------------------------------------------------------------------
-# Public loaders
+# Public loaders (name-based only)
 # --------------------------------------------------------------------------
 
-def _resolve_agent_path(name_or_path: str | Path) -> Path:
-    """Pure path resolution: a path if it looks like one, otherwise
-    ``profiles/agents/{name}.yaml``. No branching on the name's value."""
-    p = Path(name_or_path)
-    if p.suffix in (".yaml", ".yml"):
-        return p
-    return PROFILES_DIR / "agents" / f"{p}.yaml"
-
-
 def load_agent(
-    name_or_path: str | Path,
+    name: str,
     system_config: SystemConfig,
     user_config: UserConfig | None = None,
+    base_dir: Path | str | None = None,
 ) -> LoadedConfig:
-    path = _resolve_agent_path(name_or_path)
+    path = _resolve_profile_path(name, Path(base_dir) if base_dir else AGENTS_DIR)
     data = _read_yaml(path)
     agent = _validate(AgentConfig, data, str(path))
     _cross_validate(agent, system_config, str(path))
@@ -138,21 +154,26 @@ def load_agent(
     return LoadedConfig(agent=agent, system=system_config, secrets=secrets, user=user_config)
 
 
-def load_system_config(path: str | Path | None = None) -> SystemConfig:
-    """Load the system config for the current environment.
+def load_system_config(
+    env: str | None = None,
+    base_dir: Path | str | None = None,
+) -> SystemConfig:
+    """Load the system config for an environment name.
 
-    Explicit path wins; otherwise ``APP_ENV`` (default ``dev``) selects
-    ``profiles/system/{env}.yaml``. No layered merge cascade in this phase.
+    ``env`` defaults to ``APP_ENV`` (default ``dev``); either way the name
+    is validated against the safe pattern before any filesystem access.
     """
-    if path is None:
+    if env is None:
         env = os.environ.get("APP_ENV", "dev")
-        path = PROFILES_DIR / "system" / f"{env}.yaml"
-    path = Path(path)
+    path = _resolve_profile_path(env, Path(base_dir) if base_dir else SYSTEM_DIR)
     data = _read_yaml(path)
     return _validate(SystemConfig, data, str(path))
 
 
-def load_user_config(path: str | Path) -> UserConfig:
-    path = Path(path)
+def load_user_config(
+    name: str,
+    base_dir: Path | str | None = None,
+) -> UserConfig:
+    path = _resolve_profile_path(name, Path(base_dir) if base_dir else USERS_DIR)
     data = _read_yaml(path)
     return _validate(UserConfig, data, str(path))
