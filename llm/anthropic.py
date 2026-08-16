@@ -11,6 +11,8 @@ dependencies.
 from __future__ import annotations
 
 import json
+import time
+import urllib.error
 import urllib.request
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +23,23 @@ if TYPE_CHECKING:
 
 DEFAULT_ENDPOINT = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
+
+# Bounded retry for transient failures (amended Rule 10: bounded wall-clock).
+# A constant on purpose — not configurable away. Total attempts = 1 + MAX_RETRIES.
+MAX_RETRIES = 2
+
+
+class LLMRequestError(Exception):
+    """The request failed after exhausting the bounded retries."""
+
+
+def _is_retryable(error: OSError) -> bool:
+    """Transient failures only: timeouts, connection errors, throttling,
+    server errors. Client errors (4xx other than 429) fail immediately —
+    retrying a bad request just burns the bound."""
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code == 429 or error.code >= 500
+    return True  # TimeoutError, URLError, ConnectionError, ... — all OSError
 
 
 def _to_anthropic_messages(messages: list[dict]) -> list[dict]:
@@ -74,6 +93,7 @@ class AnthropicAdapter(LLMPort):
         endpoint: str | None = None,
         max_output_tokens: int = 1024,
         timeout_seconds: float = 120.0,
+        retry_backoff_seconds: float = 1.0,
     ) -> None:
         self._provider_name = provider_name
         self._model = model
@@ -83,6 +103,7 @@ class AnthropicAdapter(LLMPort):
         self._endpoint = endpoint or DEFAULT_ENDPOINT
         self._max_output_tokens = max_output_tokens
         self._timeout_seconds = timeout_seconds
+        self._retry_backoff_seconds = retry_backoff_seconds
 
     def complete(self, messages: list[dict], tool_schemas: list[dict]) -> LLMResponse:
         # Resolved per request, used for this call, never retained.
@@ -106,7 +127,7 @@ class AnthropicAdapter(LLMPort):
                 for s in tool_schemas
             ]
 
-        data = self._post(payload, api_key)
+        data = self._post_with_retries(payload, api_key)
 
         text_parts: list[str] = []
         tool_calls: list[ToolCall] = []
@@ -134,6 +155,25 @@ class AnthropicAdapter(LLMPort):
         # a later nicety and nothing currently depends on precision here.
         blob = json.dumps(messages) + json.dumps(tool_schemas)
         return max(1, len(blob) // 4)
+
+    def _post_with_retries(self, payload: dict, api_key: str) -> dict:
+        """At most 1 + MAX_RETRIES attempts, backoff between them. Exhausted
+        retries raise — the loop turns that into a clean Errored, never a
+        hang (the per-request timeout below bounds each attempt)."""
+        last_error: OSError | None = None
+        for attempt in range(1 + MAX_RETRIES):
+            if attempt:
+                time.sleep(self._retry_backoff_seconds * attempt)
+            try:
+                return self._post(payload, api_key)
+            except OSError as e:
+                if not _is_retryable(e):
+                    raise
+                last_error = e
+        raise LLMRequestError(
+            f"request failed after {1 + MAX_RETRIES} attempts: "
+            f"{type(last_error).__name__}: {last_error}"
+        )
 
     def _post(self, payload: dict, api_key: str) -> dict:
         """One HTTP POST. Isolated so contract tests mock exactly this seam."""

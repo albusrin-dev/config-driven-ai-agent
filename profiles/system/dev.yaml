@@ -21,10 +21,10 @@ limits:
   max_tool_calls_per_session: 50
 
 sandbox:
-  # Relative fs_root resolves against the process working directory —
-  # run the CLI from the repo root. Still a confined sandbox: everything
-  # outside it is denied by the gate.
-  fs_root: workspace
+  # A relative fs_root is anchored to THIS file's directory (stable base,
+  # never the CWD) — ../../workspace is <repo root>/workspace. Still a
+  # confined sandbox: everything outside it is denied by the gate.
+  fs_root: ../../workspace
   denied_paths: []
   command_deny_patterns: []
   egress_allowlist: []   # empty = deny-all once enforcement lands

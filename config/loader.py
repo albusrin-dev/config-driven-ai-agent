@@ -18,7 +18,7 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ValidationError
 
-from core.paths import PathEscapeError, confine
+from core.paths import PathEscapeError, confine, resolve_real
 
 from .errors import ConfigValidationError, ProfileNotFoundError, UnsafeProfileNameError
 from .models import (
@@ -167,7 +167,15 @@ def load_system_config(
         env = os.environ.get("APP_ENV", "dev")
     path = _resolve_profile_path(env, Path(base_dir) if base_dir else SYSTEM_DIR)
     data = _read_yaml(path)
-    return _validate(SystemConfig, data, str(path))
+    system = _validate(SystemConfig, data, str(path))
+    # A relative sandbox root is anchored to the config file's directory —
+    # a stable base — never the process CWD, so the sandbox cannot move
+    # depending on where the CLI is launched (A4).
+    if system.sandbox.fs_root is not None:
+        root = Path(system.sandbox.fs_root)
+        if not root.is_absolute():
+            system.sandbox.fs_root = str(resolve_real(path.parent / root))
+    return system
 
 
 def load_user_config(

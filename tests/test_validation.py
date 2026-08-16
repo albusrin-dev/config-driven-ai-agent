@@ -32,10 +32,12 @@ def _load_broken(tmp_path, system_config, yaml_text, name="broken"):
 
 
 def test_unknown_extra_field(tmp_path, system_config):
+    # 'memory' became a real field in Phase 3, so probe with a name that
+    # stays unknown; capability booleans are still rejected (Durable Rule 3).
     err = _load_broken(
-        tmp_path, system_config, VALID_AGENT + "\nmemory: true\n"
+        tmp_path, system_config, VALID_AGENT + "\nfilesystem: true\n"
     )
-    assert "memory" in str(err)
+    assert "filesystem" in str(err)
     assert "unknown field" in str(err)
 
 

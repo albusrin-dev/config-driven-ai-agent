@@ -9,13 +9,18 @@ Built incrementally in phases. Phase 0 delivered the configuration
 foundation (models, secret references, loader, errors, profiles, tests).
 Phase 1 added the tools layer: Tool interface, effect vocabulary, registry,
 the pure PolicyGate, and the single enforcement chokepoint, plus three
-built-in filesystem tools. Phase 2 (this codebase today) makes it run: the
-LLMPort contract with an Anthropic adapter, a bounded reactive loop driving
-tools only through the gate, a serializable session with enforced budgets
-and a hard iteration ceiling, presence-aware confirmation with
-suspend/resume, and a thin CLI. No network/web or shell tools, no
-persistent memory or summarization, no planning, no events, voice, browser,
-workflows, skills, MCP, or rich UI until their phases arrive.
+built-in filesystem tools. Phase 2 made it run: the LLMPort contract with
+an Anthropic adapter, a bounded reactive loop driving tools only through
+the gate, a serializable session with enforced budgets and a hard
+iteration ceiling, presence-aware confirmation with suspend/resume, and a
+thin CLI. Phase 3 (this codebase today) adds context management and the
+memory seam: a one-method MemoryPort with null and window adapters (head +
+marker + recent tail, tool-pair safe), loop integration that windows what
+is SENT while the session stores full history, LLM retry bounds, resume
+re-planning, and a CWD-independent sandbox anchor. No persistent /
+cross-session memory, no retrieval, no LLM summarization, no network/web
+or shell tools, no planning, no events, voice, browser, workflows, skills,
+MCP, or rich UI until their phases arrive.
 
 ## Durable Project Rules (all phases)
 
@@ -50,9 +55,14 @@ workflows, skills, MCP, or rich UI until their phases arrive.
    available, **suspend** the run (record the pending action, await
    approval) — never auto-approve, never auto-deny, and never let the model
    route around a required confirmation by choosing a different tool.
-10. **Every run is bounded.** No unbounded loops. Every run terminates by
-    completion, by a budget cap, or by a hard iteration ceiling. Budgets
-    and the ceiling always apply; they are not configurable away.
+10. **Every run is bounded — in iterations and in wall-clock.** No
+    unbounded loops and no unbounded waits: the iteration ceiling always
+    applies, and every external call (LLM, and later network/tools) has an
+    explicit timeout and bounded retry. Not configurable away.
+11. **The session is the complete conversation and the source of truth**;
+    it is persisted and audited in full. The memory layer only shapes what
+    is sent to the model for a given call — it never mutates,
+    summarizes-in-place, or drops from stored history.
 
 ## Dev notes
 
@@ -71,12 +81,27 @@ workflows, skills, MCP, or rich UI until their phases arrive.
   the bundle can contain a key, because the value is never stored.
 - Layout: `config/` (schemas, loader, secret references), `core/` (effects,
   Tool contracts in `core/base.py`, PolicyGate, `enforce_and_run`, audit,
-  path confinement, `core/llm.py` LLMPort contract, `core/session.py`,
-  `core/loop.py`), `tools/` (registry, built-in filesystem tools), `llm/`
-  (provider adapters), `testing/` (FakeLLM double), `ui/` (thin CLI).
-  Dependencies point inward: `ui` → `llm`/`tools` → `core` →
-  `config.models`; `core` never imports `tools` or `llm`;
+  path confinement, `core/llm.py` LLMPort contract, `core/memory.py`
+  MemoryPort contract, `core/session.py`, `core/loop.py`), `tools/`
+  (registry, built-in filesystem tools), `llm/` (provider adapters),
+  `memory/` (null + window adapters, `adapter_for` factory), `testing/`
+  (FakeLLM double), `ui/` (thin CLI), `scripts/` (standalone checks).
+  Dependencies point inward: `ui` → `llm`/`memory`/`tools` → `core` →
+  `config.models`; `core` never imports `tools`, `llm`, or `memory`;
   `core/__init__.py` stays import-free to keep the graph acyclic.
+- Rule 11 in practice: the loop windows what is SENT via the injected
+  MemoryPort (`memory=None` = raw buffer = strategy `none`); the session's
+  stored conversation is never touched. The window adapter cuts only at
+  tool-pair block boundaries and raises `ContextBudgetError` (a terminal
+  Errored) when head + one turn can't fit. Known limitation: drop-middle
+  can lose intermediate steps; the upgrade path is an LLM-summarizing
+  adapter behind the same port.
+- POSIX note: the no-follow guards (`core/paths.py`) are verified by tests
+  that need symlink privilege; on a fresh Linux checkout run the full
+  suite, or `python3 scripts/verify_posix_nofollow.py` standalone
+  (stdlib-only) for the security-critical subset.
+- A relative `sandbox.fs_root` anchors to the system-config file's
+  directory (never the CWD).
 - The loop's iteration ceiling (`core/loop.py: ITERATION_CEILING`) is a
   constant on purpose — Rule 10 forbids configuring it away. The session's
   conversation buffer is naive (no summarization); real context management

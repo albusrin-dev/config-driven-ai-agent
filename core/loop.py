@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Callable
 from .enforce import Denied, Executed, Pending, enforce_and_run
 from .errors import ToolParamError, UnknownToolError
 from .llm import LLMPort, ToolCall, estimate_cost
+from .memory import ContextBudgetError, MemoryPort
 from .session import PendingAction, Session, ToolCallRecord
 
 if TYPE_CHECKING:
@@ -202,6 +203,24 @@ def _process_calls(
 # The loop
 # --------------------------------------------------------------------------
 
+def _assemble_context(
+    session: Session,
+    memory: MemoryPort | None,
+    llm: LLMPort,
+    agent_config: AgentConfig,
+) -> list[dict]:
+    """What gets SENT this call. The session keeps full history regardless
+    (Rule 11); ``memory=None`` sends the raw buffer (= strategy 'none'), so
+    the loop never depends on a concrete adapter."""
+    if memory is None:
+        return list(session.conversation)
+    return memory.assemble_context(
+        session.conversation,
+        agent_config.memory.budget_tokens,
+        lambda messages: llm.count_tokens(messages, []),
+    )
+
+
 def _drive(
     session: Session,
     llm: LLMPort,
@@ -209,6 +228,7 @@ def _drive(
     agent_config: AgentConfig,
     system_config: SystemConfig,
     approver: Approver | None,
+    memory: MemoryPort | None = None,
 ) -> TurnResult:
     pricing = system_config.providers[agent_config.llm.provider].pricing
     if pricing is None:
@@ -228,8 +248,14 @@ def _drive(
         session.budget.iterations += 1
 
         try:
+            messages = _assemble_context(session, memory, llm, agent_config)
+        except ContextBudgetError as e:
+            session.status = "error"
+            return Errored(f"context assembly failed: {e}")
+
+        try:
             response = llm.complete(
-                session.conversation, tool_schemas_for(registry, agent_config)
+                messages, tool_schemas_for(registry, agent_config)
             )
         except Exception as e:
             session.status = "error"
@@ -272,6 +298,7 @@ def run_turn(
     agent_config: AgentConfig,
     system_config: SystemConfig,
     approver: Approver | None = None,
+    memory: MemoryPort | None = None,
 ) -> TurnResult:
     if session.status == "awaiting_approval":
         return Errored(
@@ -281,7 +308,7 @@ def run_turn(
     session.conversation.append({"role": "user", "content": user_message})
     session.status = "running"
     session.budget.iterations = 0  # the ceiling is per run; resume continues the same run
-    return _drive(session, llm, registry, agent_config, system_config, approver)
+    return _drive(session, llm, registry, agent_config, system_config, approver, memory)
 
 
 def resume(
@@ -292,6 +319,7 @@ def resume(
     agent_config: AgentConfig,
     system_config: SystemConfig,
     approver: Approver | None = None,
+    memory: MemoryPort | None = None,
 ) -> TurnResult:
     """Continue a suspended run after a human decision on the pending action."""
     if session.status != "awaiting_approval" or session.pending_action is None:
@@ -325,4 +353,4 @@ def resume(
     )
     if result is not None:
         return result
-    return _drive(session, llm, registry, agent_config, system_config, approver)
+    return _drive(session, llm, registry, agent_config, system_config, approver, memory)

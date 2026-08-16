@@ -24,3 +24,9 @@ tools:
     - delete_file
 
 autonomy: supervised
+
+# Context sent to the model is windowed to this budget; the session always
+# stores full history (Durable Rule 11). strategy 'none' = raw buffer.
+memory:
+  strategy: window
+  budget_tokens: 8000

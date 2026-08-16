@@ -21,6 +21,7 @@ from core.loop import (
 )
 from core.session import new_session
 from llm.anthropic import AnthropicAdapter
+from memory import adapter_for
 from tools.registry import ToolRegistry
 from tools.builtins.files import DeleteFileTool, ReadFileTool, WriteFileTool
 
@@ -54,11 +55,14 @@ def run_cli(
     loaded: LoadedConfig,
     llm,
     registry: ToolRegistry,
+    memory=None,
     input_fn: InputFn = input,
     print_fn: PrintFn = print,
 ) -> None:
     session = new_session(loaded.agent.name)
     approver = make_cli_approver(input_fn, print_fn)
+    if memory is None:
+        memory = adapter_for(loaded.agent.memory.strategy)
     print_fn(f"agent '{loaded.agent.name}' ready (autonomy: "
              f"{loaded.agent.autonomy.value}). 'exit' or blank line to quit.")
 
@@ -71,7 +75,8 @@ def run_cli(
             break
 
         result = run_turn(session, line, llm, registry,
-                          loaded.agent, loaded.system, approver=approver)
+                          loaded.agent, loaded.system, approver=approver,
+                          memory=memory)
         # With an inline approver, suspension is rare (e.g. piped stdin
         # closing); handle it anyway so the CLI can never dead-end.
         while isinstance(result, Suspended):
@@ -80,7 +85,7 @@ def run_cli(
             )
             result = resume(session, answer.strip().lower() in ("y", "yes"),
                             llm, registry, loaded.agent, loaded.system,
-                            approver=approver)
+                            approver=approver, memory=memory)
 
         if isinstance(result, Completed):
             print_fn(result.text)

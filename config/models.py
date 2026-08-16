@@ -50,6 +50,11 @@ class Confirm(str, Enum):
     DEFAULT = "default"
 
 
+class MemoryStrategy(str, Enum):
+    NONE = "none"      # raw buffer, exact pre-Phase-3 behavior
+    WINDOW = "window"  # head + marker + recent tail compaction
+
+
 # --------------------------------------------------------------------------
 # AgentConfig
 # --------------------------------------------------------------------------
@@ -86,6 +91,19 @@ class ToolsConfig(StrictModel):
         return v
 
 
+# Conservative default: comfortably below a typical model context minus
+# fixed per-call overhead (system prompt, tool schemas). Tunable per agent.
+DEFAULT_MEMORY_BUDGET_TOKENS = 8_000
+
+
+class MemoryConfig(StrictModel):
+    """Context assembly for what is SENT to the model. The session always
+    stores full history (Durable Rule 11)."""
+
+    strategy: MemoryStrategy = MemoryStrategy.WINDOW
+    budget_tokens: int = Field(default=DEFAULT_MEMORY_BUDGET_TOKENS, gt=0)
+
+
 class AgentConfig(StrictModel):
     # Opaque identifier — never branched on (Durable Rule 2).
     name: str = Field(min_length=1)
@@ -95,6 +113,7 @@ class AgentConfig(StrictModel):
     llm: LLMConfig
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     autonomy: Autonomy = Autonomy.ASSISTED
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
 
 
 # --------------------------------------------------------------------------
