@@ -1,0 +1,22 @@
+# System config: dev environment.
+# api_key_env is the NAME of the env var holding the key — never the value.
+env: dev
+
+providers:
+  anthropic:
+    api_key_env: ANTHROPIC_API_KEY
+  local:
+    endpoint: http://localhost:11434
+    # keyless local provider: no api_key_env
+
+limits:
+  max_autonomy: supervised
+  max_tokens_per_session: 100000
+  max_cost_per_session_usd: 5.0
+  max_tool_calls_per_session: 50
+
+sandbox:
+  fs_root: null
+  denied_paths: []
+  command_deny_patterns: []
+  egress_allowlist: []   # empty = deny-all once enforcement lands

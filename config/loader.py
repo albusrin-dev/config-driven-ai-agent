@@ -1,0 +1,158 @@
+"""Load, validate, and cross-validate config profiles.
+
+Path resolution from an agent name is pure string interpolation — the name
+is an opaque identifier and is never branched on (Durable Rule 2). YAML is
+parsed with ``yaml.safe_load`` only; nothing from a config file is ever
+executed (Durable Rule 1).
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import yaml
+from pydantic import BaseModel, ValidationError
+
+from .errors import ConfigValidationError, ProfileNotFoundError
+from .models import (
+    AUTONOMY_RANK,
+    AgentConfig,
+    SystemConfig,
+    UserConfig,
+)
+from .secrets import Secrets, resolve_secrets
+
+PROFILES_DIR = Path(__file__).resolve().parent.parent / "profiles"
+
+
+@dataclass(frozen=True)
+class LoadedConfig:
+    """Validated config bundle. Secrets are a separate object, never a
+    field on any config model."""
+
+    agent: AgentConfig
+    system: SystemConfig
+    secrets: Secrets = field(repr=False)
+    user: UserConfig | None = None
+
+
+# --------------------------------------------------------------------------
+# YAML parsing + schema validation
+# --------------------------------------------------------------------------
+
+def _read_yaml(path: Path) -> dict:
+    if not path.is_file():
+        raise ProfileNotFoundError(str(path))
+    with path.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)  # data only; never executes config content
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        raise ConfigValidationError(
+            str(path), [f"top level: expected a mapping, got {type(data).__name__}"]
+        )
+    return data
+
+
+def _format_pydantic_error(err: dict) -> str:
+    loc = ".".join(str(p) for p in err["loc"]) or "(top level)"
+    msg = err["msg"]
+    err_type = err.get("type", "")
+    ctx = err.get("ctx") or {}
+    if err_type == "enum" and "expected" in ctx:
+        msg = f"invalid value; allowed values: {ctx['expected']}"
+    elif err_type == "extra_forbidden":
+        msg = "unknown field (extra fields are forbidden — check for typos)"
+    elif err_type == "missing":
+        msg = "required field is missing"
+    got = err.get("input")
+    if err_type not in ("missing",) and got is not None and not isinstance(got, dict):
+        msg += f" (got: {got!r})"
+    return f"{loc}: {msg}"
+
+
+def _validate(model_cls: type[BaseModel], data: dict, source: str) -> BaseModel:
+    try:
+        return model_cls.model_validate(data)
+    except ValidationError as e:
+        problems = [_format_pydantic_error(err) for err in e.errors()]
+        raise ConfigValidationError(source, problems) from None
+
+
+# --------------------------------------------------------------------------
+# Cross-validation (agent vs system)
+# --------------------------------------------------------------------------
+
+def _cross_validate(agent: AgentConfig, system: SystemConfig, source: str) -> None:
+    problems: list[str] = []
+
+    if agent.llm.provider not in system.providers:
+        allowed = sorted(system.providers)
+        problems.append(
+            f"llm.provider: '{agent.llm.provider}' is not defined in "
+            f"system providers; allowed values: {allowed}"
+        )
+
+    unknown_overrides = sorted(set(agent.tools.overrides) - set(agent.tools.allowlist))
+    if unknown_overrides:
+        problems.append(
+            f"tools.overrides: keys must be a subset of tools.allowlist; "
+            f"not in allowlist: {unknown_overrides}"
+        )
+
+    if AUTONOMY_RANK[agent.autonomy] > AUTONOMY_RANK[system.limits.max_autonomy]:
+        problems.append(
+            f"autonomy: '{agent.autonomy.value}' exceeds the system cap "
+            f"limits.max_autonomy='{system.limits.max_autonomy.value}'"
+        )
+
+    if problems:
+        raise ConfigValidationError(source, problems)
+
+
+# --------------------------------------------------------------------------
+# Public loaders
+# --------------------------------------------------------------------------
+
+def _resolve_agent_path(name_or_path: str | Path) -> Path:
+    """Pure path resolution: a path if it looks like one, otherwise
+    ``profiles/agents/{name}.yaml``. No branching on the name's value."""
+    p = Path(name_or_path)
+    if p.suffix in (".yaml", ".yml"):
+        return p
+    return PROFILES_DIR / "agents" / f"{p}.yaml"
+
+
+def load_agent(
+    name_or_path: str | Path,
+    system_config: SystemConfig,
+    user_config: UserConfig | None = None,
+) -> LoadedConfig:
+    path = _resolve_agent_path(name_or_path)
+    data = _read_yaml(path)
+    agent = _validate(AgentConfig, data, str(path))
+    _cross_validate(agent, system_config, str(path))
+    secrets = resolve_secrets(agent, system_config)
+    return LoadedConfig(agent=agent, system=system_config, secrets=secrets, user=user_config)
+
+
+def load_system_config(path: str | Path | None = None) -> SystemConfig:
+    """Load the system config for the current environment.
+
+    Explicit path wins; otherwise ``APP_ENV`` (default ``dev``) selects
+    ``profiles/system/{env}.yaml``. No layered merge cascade in this phase.
+    """
+    if path is None:
+        env = os.environ.get("APP_ENV", "dev")
+        path = PROFILES_DIR / "system" / f"{env}.yaml"
+    path = Path(path)
+    data = _read_yaml(path)
+    return _validate(SystemConfig, data, str(path))
+
+
+def load_user_config(path: str | Path) -> UserConfig:
+    path = Path(path)
+    data = _read_yaml(path)
+    return _validate(UserConfig, data, str(path))

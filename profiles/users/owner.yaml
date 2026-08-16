@@ -1,0 +1,8 @@
+# User profile: owner. Free-form preferences are data for the prompt in a
+# later phase — no logic.
+id: owner
+display_name: Owner
+timezone: UTC
+preferences:
+  briefing_time: "08:00"
+  units: metric

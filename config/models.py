@@ -1,0 +1,142 @@
+"""Pydantic v2 schemas for agent, user, and system configuration.
+
+All models are strict (``extra="forbid"``): unknown fields are an error, not
+a warning (Durable Rule 5). Nothing here reads the environment or touches
+disk — parsing/IO lives in the loader, secret resolution in ``secrets.py``.
+"""
+
+from __future__ import annotations
+
+from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class StrictModel(BaseModel):
+    """Base with fail-closed settings shared by every config model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+# --------------------------------------------------------------------------
+# Enums
+# --------------------------------------------------------------------------
+
+class Autonomy(str, Enum):
+    ASSISTED = "assisted"
+    SUPERVISED = "supervised"
+    AUTONOMOUS_BOUNDED = "autonomous_bounded"
+
+
+# Single source of truth for autonomy ordering; used by the loader's
+# ceiling check (agent autonomy must not exceed system max_autonomy).
+AUTONOMY_RANK: dict[Autonomy, int] = {
+    Autonomy.ASSISTED: 0,
+    Autonomy.SUPERVISED: 1,
+    Autonomy.AUTONOMOUS_BOUNDED: 2,
+}
+
+
+class Env(str, Enum):
+    DEV = "dev"
+    STAGING = "staging"
+    PROD = "prod"
+
+
+class Confirm(str, Enum):
+    ALWAYS = "always"
+    NEVER = "never"
+    DEFAULT = "default"
+
+
+# --------------------------------------------------------------------------
+# AgentConfig
+# --------------------------------------------------------------------------
+
+class PersonaConfig(StrictModel):
+    mission: str = Field(min_length=1)
+    style: str = "neutral"
+
+
+class LLMConfig(StrictModel):
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    temperature: float = Field(default=0.4, ge=0.0, le=2.0)
+
+
+class ToolOverride(StrictModel):
+    confirm: Confirm
+
+
+class ToolsConfig(StrictModel):
+    # Empty allowlist = agent can do nothing (safe default, Durable Rule 3).
+    allowlist: list[str] = Field(default_factory=list)
+    overrides: dict[str, ToolOverride] = Field(default_factory=dict)
+
+    @field_validator("allowlist")
+    @classmethod
+    def _allowlist_entries(cls, v: list[str]) -> list[str]:
+        for entry in v:
+            if not entry or not entry.strip():
+                raise ValueError("allowlist entries must be non-empty strings")
+        if len(set(v)) != len(v):
+            dupes = sorted({e for e in v if v.count(e) > 1})
+            raise ValueError(f"allowlist entries must be unique; duplicates: {dupes}")
+        return v
+
+
+class AgentConfig(StrictModel):
+    # Opaque identifier — never branched on (Durable Rule 2).
+    name: str = Field(min_length=1)
+    version: int
+    description: str = ""
+    persona: PersonaConfig
+    llm: LLMConfig
+    tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    autonomy: Autonomy = Autonomy.ASSISTED
+
+
+# --------------------------------------------------------------------------
+# UserConfig
+# --------------------------------------------------------------------------
+
+class UserConfig(StrictModel):
+    id: str = Field(min_length=1)
+    display_name: str = ""
+    timezone: str = "UTC"
+    # Free-form data fed to the prompt in a later phase. No logic.
+    preferences: dict[str, Any] = Field(default_factory=dict)
+
+
+# --------------------------------------------------------------------------
+# SystemConfig
+# --------------------------------------------------------------------------
+
+class ProviderConfig(StrictModel):
+    endpoint: str | None = None
+    # NAME of the env var holding the key — never the key itself
+    # (Durable Rule 4). May be omitted for a keyless local provider.
+    api_key_env: str | None = None
+
+
+class LimitsConfig(StrictModel):
+    max_autonomy: Autonomy = Autonomy.SUPERVISED
+    max_tokens_per_session: int = Field(default=100_000, gt=0)
+    max_cost_per_session_usd: float = Field(default=5.0, ge=0)
+    max_tool_calls_per_session: int = Field(default=50, gt=0)
+
+
+class SandboxConfig(StrictModel):
+    fs_root: str | None = None
+    denied_paths: list[str] = Field(default_factory=list)
+    command_deny_patterns: list[str] = Field(default_factory=list)
+    # Empty = deny-all when enforcement lands (fail-closed).
+    egress_allowlist: list[str] = Field(default_factory=list)
+
+
+class SystemConfig(StrictModel):
+    env: Env = Env.DEV
+    providers: dict[str, ProviderConfig]
+    limits: LimitsConfig = Field(default_factory=LimitsConfig)
+    sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
