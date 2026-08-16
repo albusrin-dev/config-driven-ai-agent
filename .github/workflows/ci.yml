@@ -1,0 +1,22 @@
+# A1: Linux CI is the gate for the POSIX no-follow verification — the
+# three symlink tests that skip on Windows run for real on ubuntu-latest.
+# This workflow activates the moment the repo gets a GitHub remote.
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]  # ubuntu: POSIX no-follow tests; windows: junction tests
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install "pydantic>=2" pyyaml pytest
+      # Run from the repo root; tests/conftest.py puts the root on sys.path.
+      - run: pytest -v
+      # The security-critical subset, standalone (belt and braces on Linux).
+      - if: runner.os == 'Linux'
+        run: python3 scripts/verify_posix_nofollow.py

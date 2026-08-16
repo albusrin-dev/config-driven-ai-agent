@@ -85,6 +85,25 @@ def test_tool_schema_mapping(adapter, captured, monkeypatch):
     assert "path" in mapped["input_schema"]["properties"]
 
 
+def test_system_role_message_hoisted_into_system_field(adapter, captured, monkeypatch):
+    """The loop's assembled identity prompt arrives as a system-role
+    message; the API has no such role in `messages`, so the adapter hoists
+    it into the top-level `system` field (after any constructor prompt)."""
+    monkeypatch.setenv(KEY_VAR, "k")
+    adapter.complete(
+        [
+            {"role": "system", "content": "## Mission\nCurate the archive."},
+            {"role": "user", "content": "hi"},
+        ],
+        [],
+    )
+    payload = captured["payload"]
+    assert payload["system"] == "Be a scribe.\n\n## Mission\nCurate the archive."
+    # No system-role message may leak into the messages array.
+    assert all(m["role"] in ("user", "assistant") for m in payload["messages"])
+    assert payload["messages"][0]["content"][0]["text"] == "hi"
+
+
 def test_message_mapping_and_same_role_merge():
     neutral = [
         {"role": "user", "content": "copy the file"},

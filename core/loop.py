@@ -42,6 +42,11 @@ logger = logging.getLogger("agent.loop")
 # Hard per-run ceiling on loop iterations. A constant, not config (Rule 10).
 ITERATION_CEILING = 25
 
+# Tokens held back from the model's context window for its own output when
+# DERIVING the context budget (A2): budget = context_window − this reserve
+# − measured fixed overhead (system prompt + tool schemas).
+OUTPUT_RESERVE_TOKENS = 4_096
+
 Approver = Callable[["GateDecision"], bool]
 
 
@@ -203,22 +208,60 @@ def _process_calls(
 # The loop
 # --------------------------------------------------------------------------
 
+def effective_context_budget(
+    session: Session,
+    agent_config: AgentConfig,
+    llm: LLMPort,
+    tool_schemas: list[dict],
+) -> int:
+    """The conversation-context budget for this run (A2).
+
+    An explicit ``memory.budget_tokens`` wins; otherwise the budget is
+    DERIVED from the model's context window minus an output reserve minus
+    the measured fixed overhead (system prompt + tool schemas) — no magic
+    constant that is only correct by luck."""
+    if agent_config.memory.budget_tokens is not None:
+        return agent_config.memory.budget_tokens
+    overhead_messages = (
+        [{"role": "system", "content": session.system_prompt}]
+        if session.system_prompt
+        else []
+    )
+    overhead = llm.count_tokens(overhead_messages, tool_schemas)
+    derived = agent_config.llm.context_window - OUTPUT_RESERVE_TOKENS - overhead
+    if derived <= 0:
+        raise ContextBudgetError(
+            f"model context window ({agent_config.llm.context_window} tokens) "
+            f"cannot hold the output reserve ({OUTPUT_RESERVE_TOKENS}) plus "
+            f"fixed overhead ({overhead}); no room for conversation context"
+        )
+    return derived
+
+
 def _assemble_context(
     session: Session,
     memory: MemoryPort | None,
     llm: LLMPort,
     agent_config: AgentConfig,
+    tool_schemas: list[dict],
 ) -> list[dict]:
     """What gets SENT this call. The session keeps full history regardless
     (Rule 11); ``memory=None`` sends the raw buffer (= strategy 'none'), so
-    the loop never depends on a concrete adapter."""
+    the loop never depends on a concrete adapter. The assembled system
+    prompt is prepended AFTER windowing — it lives outside the stored
+    conversation, so it survives compaction by construction and stored
+    history stays pure."""
     if memory is None:
-        return list(session.conversation)
-    return memory.assemble_context(
-        session.conversation,
-        agent_config.memory.budget_tokens,
-        lambda messages: llm.count_tokens(messages, []),
-    )
+        messages = list(session.conversation)
+    else:
+        messages = memory.assemble_context(
+            session.conversation,
+            effective_context_budget(session, agent_config, llm, tool_schemas),
+            lambda msgs: llm.count_tokens(msgs, []),
+        )
+    if session.system_prompt:
+        messages = [{"role": "system", "content": session.system_prompt}] + messages
+    return messages
 
 
 def _drive(
@@ -247,16 +290,15 @@ def _drive(
             return BudgetExceeded("iteration_ceiling")
         session.budget.iterations += 1
 
+        schemas = tool_schemas_for(registry, agent_config)
         try:
-            messages = _assemble_context(session, memory, llm, agent_config)
+            messages = _assemble_context(session, memory, llm, agent_config, schemas)
         except ContextBudgetError as e:
             session.status = "error"
             return Errored(f"context assembly failed: {e}")
 
         try:
-            response = llm.complete(
-                messages, tool_schemas_for(registry, agent_config)
-            )
+            response = llm.complete(messages, schemas)
         except Exception as e:
             session.status = "error"
             return Errored(f"LLM call failed: {type(e).__name__}: {e}")

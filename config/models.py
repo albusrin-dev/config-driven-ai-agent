@@ -62,12 +62,29 @@ class MemoryStrategy(str, Enum):
 class PersonaConfig(StrictModel):
     mission: str = Field(min_length=1)
     style: str = "neutral"
+    # Optional richer identity, all consumed by the prompt assembler now.
+    tone: str = ""
+    communication_style: str = ""
+
+
+class RoleConfig(StrictModel):
+    """Optional role block: what the agent is FOR, fed to the assembler."""
+
+    title: str = ""
+    responsibilities: list[str] = Field(default_factory=list)
+
+
+# Per-model context window, config-tunable. The conservative default suits
+# current Claude models; the derived context budget (core.loop) subtracts
+# an output reserve and measured overhead from this.
+DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000
 
 
 class LLMConfig(StrictModel):
     provider: str = Field(min_length=1)
     model: str = Field(min_length=1)
     temperature: float = Field(default=0.4, ge=0.0, le=2.0)
+    context_window: int = Field(default=DEFAULT_CONTEXT_WINDOW_TOKENS, gt=0)
 
 
 class ToolOverride(StrictModel):
@@ -91,17 +108,16 @@ class ToolsConfig(StrictModel):
         return v
 
 
-# Conservative default: comfortably below a typical model context minus
-# fixed per-call overhead (system prompt, tool schemas). Tunable per agent.
-DEFAULT_MEMORY_BUDGET_TOKENS = 8_000
-
-
 class MemoryConfig(StrictModel):
     """Context assembly for what is SENT to the model. The session always
-    stores full history (Durable Rule 11)."""
+    stores full history (Durable Rule 11).
+
+    ``budget_tokens`` is an explicit override; when None (the default) the
+    budget is DERIVED per run: llm.context_window minus an output reserve
+    minus the measured fixed overhead (system prompt + tool schemas)."""
 
     strategy: MemoryStrategy = MemoryStrategy.WINDOW
-    budget_tokens: int = Field(default=DEFAULT_MEMORY_BUDGET_TOKENS, gt=0)
+    budget_tokens: int | None = Field(default=None, gt=0)
 
 
 class AgentConfig(StrictModel):
@@ -110,6 +126,7 @@ class AgentConfig(StrictModel):
     version: int
     description: str = ""
     persona: PersonaConfig
+    role: RoleConfig = Field(default_factory=RoleConfig)
     llm: LLMConfig
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     autonomy: Autonomy = Autonomy.ASSISTED
@@ -120,11 +137,18 @@ class AgentConfig(StrictModel):
 # UserConfig
 # --------------------------------------------------------------------------
 
+class UserContext(StrictModel):
+    """Optional free-text context about the user, fed to the assembler."""
+
+    about: str = ""
+
+
 class UserConfig(StrictModel):
     id: str = Field(min_length=1)
     display_name: str = ""
     timezone: str = "UTC"
-    # Free-form data fed to the prompt in a later phase. No logic.
+    context: UserContext = Field(default_factory=UserContext)
+    # Free-form data woven into the prompt by the assembler. No logic.
     preferences: dict[str, Any] = Field(default_factory=dict)
 
 

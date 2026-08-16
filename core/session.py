@@ -49,11 +49,20 @@ Status = Literal[
 class Session(_Strict):
     session_id: str
     agent_name: str
+    # Assembled once at session start (identity does not change mid-session)
+    # and prepended to every LLM call by the loop. Built from profile/user
+    # data only, so serializing it keeps the dump secret-free. It is NOT
+    # part of ``conversation`` — stored history stays pure (Rule 11).
+    system_prompt: str = ""
     conversation: list[dict[str, Any]] = Field(default_factory=list)
     budget: BudgetState = Field(default_factory=BudgetState)
     status: Status = "idle"
     pending_action: PendingAction | None = None
 
 
-def new_session(agent_name: str) -> Session:
-    return Session(session_id=uuid.uuid4().hex, agent_name=agent_name)
+def new_session(agent_name: str, system_prompt: str = "") -> Session:
+    return Session(
+        session_id=uuid.uuid4().hex,
+        agent_name=agent_name,
+        system_prompt=system_prompt,
+    )

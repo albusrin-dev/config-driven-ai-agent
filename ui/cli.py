@@ -11,6 +11,7 @@ import argparse
 from typing import Callable
 
 from config.loader import LoadedConfig, load_agent, load_system_config
+from core.identity import build_system_prompt
 from core.loop import (
     BudgetExceeded,
     Completed,
@@ -59,7 +60,10 @@ def run_cli(
     input_fn: InputFn = input,
     print_fn: PrintFn = print,
 ) -> None:
-    session = new_session(loaded.agent.name)
+    session = new_session(
+        loaded.agent.name,
+        system_prompt=build_system_prompt(loaded.agent, loaded.user),
+    )
     approver = make_cli_approver(input_fn, print_fn)
     if memory is None:
         memory = adapter_for(loaded.agent.memory.strategy)
@@ -113,12 +117,13 @@ def main(argv: list[str] | None = None) -> None:
     system = load_system_config(args.env)
     loaded = load_agent(args.agent, system)
     provider = system.providers[loaded.agent.llm.provider]
+    # No constructor system prompt: identity now arrives per call as the
+    # session's assembled prompt (a system-role message the adapter hoists).
     llm = AnthropicAdapter(
         provider_name=loaded.agent.llm.provider,
         model=loaded.agent.llm.model,
         secrets=loaded.secrets,
         temperature=loaded.agent.llm.temperature,
-        system_prompt=loaded.agent.persona.mission,
         endpoint=provider.endpoint,
     )
     run_cli(loaded, llm, build_registry())

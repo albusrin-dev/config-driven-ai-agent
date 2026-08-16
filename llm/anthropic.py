@@ -109,14 +109,25 @@ class AnthropicAdapter(LLMPort):
         # Resolved per request, used for this call, never retained.
         api_key = self._secrets.resolve_secret(self._provider_name)
 
+        # The API has no system role in `messages`: hoist system-role
+        # messages (the loop's assembled identity prompt) into the
+        # top-level `system` field, after any constructor-supplied prompt.
+        system_parts = [self._system_prompt] if self._system_prompt else []
+        conversation = []
+        for message in messages:
+            if message["role"] == "system":
+                system_parts.append(message["content"])
+            else:
+                conversation.append(message)
+
         payload: dict[str, Any] = {
             "model": self._model,
             "max_tokens": self._max_output_tokens,
             "temperature": self._temperature,
-            "messages": _to_anthropic_messages(messages),
+            "messages": _to_anthropic_messages(conversation),
         }
-        if self._system_prompt:
-            payload["system"] = self._system_prompt
+        if system_parts:
+            payload["system"] = "\n\n".join(system_parts)
         if tool_schemas:
             payload["tools"] = [
                 {
@@ -151,10 +162,17 @@ class AnthropicAdapter(LLMPort):
         )
 
     def count_tokens(self, messages: list[dict], tool_schemas: list[dict]) -> int:
-        # Local heuristic (~4 chars/token); the provider's count endpoint is
-        # a later nicety and nothing currently depends on precision here.
+        """LOCAL, deliberately conservative estimate (A2).
+
+        Never a network call: counting happens on every context assembly,
+        and a remote count would reintroduce an unbounded wait (Rule 10).
+        Over-estimates on purpose: English averages ~3.5–4 chars/token and
+        JSON/code ~3–3.5, so chars/3 plus a per-message overhead counts
+        HIGH — an undercount would let assembled context exceed the real
+        window and 400 at the provider, an overcount merely compacts a
+        little early."""
         blob = json.dumps(messages) + json.dumps(tool_schemas)
-        return max(1, len(blob) // 4)
+        return len(blob) // 3 + 8 * len(messages) + 1
 
     def _post_with_retries(self, payload: dict, api_key: str) -> dict:
         """At most 1 + MAX_RETRIES attempts, backoff between them. Exhausted
