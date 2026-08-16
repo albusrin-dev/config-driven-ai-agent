@@ -43,3 +43,61 @@ def confine(path: str | os.PathLike, base: str | os.PathLike) -> Path:
     if not resolved.is_relative_to(resolve_real(base)):
         raise PathEscapeError(path, base)
     return resolved
+
+
+# --------------------------------------------------------------------------
+# Use-time guards (A1 / TOCTOU): the gate confines a blessed path at
+# decision time; these helpers re-verify at the point of use so a symlink
+# swapped in between check and use fails closed instead of escaping.
+# --------------------------------------------------------------------------
+
+class PathResolutionChangedError(Exception):
+    """A blessed path's resolution changed between authorization and use
+    (e.g. a component swapped for a symlink) — fail closed."""
+
+    def __init__(self, path: str | os.PathLike, resolved: Path) -> None:
+        super().__init__(
+            f"path '{path}' no longer resolves to itself (now '{resolved}'): "
+            f"resolution changed after authorization; refusing to touch it"
+        )
+        self.path = str(path)
+        self.resolved = str(resolved)
+
+
+# O_NOFOLLOW exists on POSIX; on Windows the realpath re-check below is the
+# guard (symlink creation is privileged there anyway). O_BINARY keeps the
+# raw fd untranslated on Windows; the text layer is added by fdopen.
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_O_BINARY = getattr(os, "O_BINARY", 0)
+
+
+def _reverify(blessed: str | os.PathLike) -> None:
+    """The blessed path was fully resolved at decision time; if resolving it
+    again yields anything else, something changed underneath us."""
+    resolved = resolve_real(blessed)
+    if resolved != Path(blessed):
+        raise PathResolutionChangedError(blessed, resolved)
+
+
+def open_no_follow_read(blessed: str | os.PathLike):
+    """Open a gate-blessed path for text reading, refusing symlinks."""
+    _reverify(blessed)
+    fd = os.open(str(blessed), os.O_RDONLY | _O_NOFOLLOW | _O_BINARY)
+    return os.fdopen(fd, "r", encoding="utf-8")
+
+
+def open_no_follow_write(blessed: str | os.PathLike):
+    """Open a gate-blessed path for text writing (create/truncate),
+    refusing symlinks."""
+    _reverify(blessed)
+    fd = os.open(
+        str(blessed),
+        os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _O_NOFOLLOW | _O_BINARY,
+    )
+    return os.fdopen(fd, "w", encoding="utf-8")
+
+
+def delete_no_follow(blessed: str | os.PathLike) -> None:
+    """Unlink a gate-blessed path after re-verifying its resolution."""
+    _reverify(blessed)
+    os.unlink(blessed)

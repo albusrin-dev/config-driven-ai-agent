@@ -173,6 +173,50 @@ def test_audit_never_contains_file_contents(system, sandbox_root, caplog):
     assert record["params_summary"]["content"] == f"<str len={len(secret_content)}>"
 
 
+def test_audit_outcome_ok_for_executed_action(system, sandbox_root, caplog):
+    agent = make_agent(allowlist=ALL_TOOLS, autonomy=Autonomy.AUTONOMOUS_BOUNDED)
+    with caplog.at_level(logging.INFO, logger="agent.audit"):
+        enforce_and_run(
+            WriteFileTool(),
+            {"path": str(sandbox_root / "a.txt"), "content": "x"},
+            agent, system,
+        )
+    [record] = _audit_records(caplog)
+    assert record["decision"] == "ALLOW"
+    assert record["outcome"] == "ok"
+    assert record["error"] is None
+
+
+def test_audit_outcome_error_names_class_not_payload(system, sandbox_root, caplog):
+    agent = make_agent(allowlist=ALL_TOOLS, autonomy=Autonomy.AUTONOMOUS_BOUNDED)
+    with caplog.at_level(logging.INFO, logger="agent.audit"):
+        outcome = enforce_and_run(
+            ReadFileTool(), {"path": str(sandbox_root / "missing.txt")}, agent, system
+        )
+    assert isinstance(outcome, Executed) and not outcome.result.ok
+    [record] = _audit_records(caplog)
+    assert record["outcome"] == "error"
+    assert "read_file failed" in record["error"]
+    assert "output" not in record  # results are never audited
+
+
+def test_audit_outcome_absent_when_nothing_executed(system, sandbox_root, caplog):
+    agent = make_agent(allowlist=ALL_TOOLS, autonomy=Autonomy.SUPERVISED)
+    with caplog.at_level(logging.INFO, logger="agent.audit"):
+        enforce_and_run(  # pending: mutating at supervised, no approver
+            WriteFileTool(),
+            {"path": str(sandbox_root / "b.txt"), "content": "x"},
+            agent, system,
+        )
+        enforce_and_run(  # denied: not in allowlist
+            ReadFileTool(), {"path": str(sandbox_root / "b.txt")},
+            make_agent(allowlist=[]), system,
+        )
+    pending, denied = _audit_records(caplog)
+    assert pending["decision"] == "REQUIRE_CONFIRMATION" and pending["outcome"] is None
+    assert denied["decision"] == "DENY" and denied["outcome"] is None
+
+
 def test_audit_redacts_sensitive_keys():
     from pydantic import BaseModel
 

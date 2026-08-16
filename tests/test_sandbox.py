@@ -120,7 +120,7 @@ class StrangeTool(Tool):
     def plan_effects(self, params, context):
         return [TeleportEffect()]
 
-    def execute(self, params, context):  # pragma: no cover — must never run
+    def execute(self, params, context, effects):  # pragma: no cover — must never run
         return ToolResult(ok=True, output="teleported")
 
 
@@ -143,5 +143,5 @@ def test_destructive_without_mutating_is_a_type_error():
             def plan_effects(self, params, context):
                 return []
 
-            def execute(self, params, context):
+            def execute(self, params, context, effects):
                 return ToolResult(ok=True)

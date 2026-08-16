@@ -7,11 +7,15 @@ anywhere.
 
 Built incrementally in phases. Phase 0 delivered the configuration
 foundation (models, secret references, loader, errors, profiles, tests).
-Phase 1 (this codebase today) adds the tools layer: Tool interface, effect
-vocabulary, registry, the pure PolicyGate, and the single enforcement
-chokepoint, plus three built-in filesystem tools. No network/shell
-enforcement, budgets, approval UI, run loop, LLM calls, memory, voice,
-browser, events, workflows, skills, or UI until their phases arrive.
+Phase 1 added the tools layer: Tool interface, effect vocabulary, registry,
+the pure PolicyGate, and the single enforcement chokepoint, plus three
+built-in filesystem tools. Phase 2 (this codebase today) makes it run: the
+LLMPort contract with an Anthropic adapter, a bounded reactive loop driving
+tools only through the gate, a serializable session with enforced budgets
+and a hard iteration ceiling, presence-aware confirmation with
+suspend/resume, and a thin CLI. No network/web or shell tools, no
+persistent memory or summarization, no planning, no events, voice, browser,
+workflows, skills, MCP, or rich UI until their phases arrive.
 
 ## Durable Project Rules (all phases)
 
@@ -40,6 +44,15 @@ browser, events, workflows, skills, or UI until their phases arrive.
    Tools contain zero permission logic; the gate is the only component that
    decides allow / deny / confirm. No code path may execute a tool while
    bypassing the gate.
+9. **Confirmation means a human decides.** When the gate returns
+   `REQUIRE_CONFIRMATION`: if a human is present, ask them; an explicit
+   human "no" is the only thing that becomes a denial. If no human is
+   available, **suspend** the run (record the pending action, await
+   approval) — never auto-approve, never auto-deny, and never let the model
+   route around a required confirmation by choosing a different tool.
+10. **Every run is bounded.** No unbounded loops. Every run terminates by
+    completion, by a budget cap, or by a hard iteration ceiling. Budgets
+    and the ceiling always apply; they are not configurable away.
 
 ## Dev notes
 
@@ -58,7 +71,18 @@ browser, events, workflows, skills, or UI until their phases arrive.
   the bundle can contain a key, because the value is never stored.
 - Layout: `config/` (schemas, loader, secret references), `core/` (effects,
   Tool contracts in `core/base.py`, PolicyGate, `enforce_and_run`, audit,
-  path confinement), `tools/` (registry, built-in filesystem tools).
-  Dependencies point inward: `tools` → `core` → `config.models`; `core`
-  never imports `tools`; `core/__init__.py` stays import-free to keep the
-  graph acyclic.
+  path confinement, `core/llm.py` LLMPort contract, `core/session.py`,
+  `core/loop.py`), `tools/` (registry, built-in filesystem tools), `llm/`
+  (provider adapters), `testing/` (FakeLLM double), `ui/` (thin CLI).
+  Dependencies point inward: `ui` → `llm`/`tools` → `core` →
+  `config.models`; `core` never imports `tools` or `llm`;
+  `core/__init__.py` stays import-free to keep the graph acyclic.
+- The loop's iteration ceiling (`core/loop.py: ITERATION_CEILING`) is a
+  constant on purpose — Rule 10 forbids configuring it away. The session's
+  conversation buffer is naive (no summarization); real context management
+  arrives with the memory phase. Cost budgeting activates only when a
+  provider has `pricing` configured; otherwise the cost cap logs as
+  inactive and token/tool-call caps still apply.
+- Run the CLI from the repo root: `python -m ui.cli scribe` (sandbox
+  `fs_root: workspace` in `profiles/system/dev.yaml` resolves against the
+  working directory).

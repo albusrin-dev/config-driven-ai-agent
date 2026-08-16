@@ -20,6 +20,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger("agent.audit")
 
 # Keys whose values are secret-shaped: never logged at all.
+# NOTE (recorded trigger): this redaction is NAME-based, which is safe only
+# while no tool takes a credential as a parameter — today the LLM API key
+# flows through Secrets.resolve_secret, never through tool params. The
+# moment any tool accepts a token/credential param, flip this to an
+# allowlist / structured summary instead of name matching.
 _SENSITIVE_KEY_PARTS = ("secret", "token", "password", "credential", "api_key", "apikey")
 # Keys that carry payloads (file contents etc.): logged as length only.
 _PAYLOAD_KEYS = ("content", "data", "body", "text")
@@ -35,6 +40,11 @@ class AuditRecord:
     reason: str
     effects_summary: tuple[str, ...]
     params_summary: dict[str, Any]
+    # Outcome of an EXECUTED action: "ok" or "error" (None when nothing
+    # executed — deny/pending). ``error`` carries the error class/message
+    # only, never result contents.
+    outcome: str | None = None
+    error: str | None = None
 
 
 def summarize_params(params: BaseModel) -> dict[str, Any]:
@@ -61,6 +71,8 @@ def make_record(
     reason: str,
     effects_summary: tuple[str, ...],
     params: BaseModel,
+    outcome: str | None = None,
+    error: str | None = None,
 ) -> AuditRecord:
     return AuditRecord(
         timestamp=datetime.now(timezone.utc).isoformat(),
@@ -70,6 +82,8 @@ def make_record(
         reason=reason,
         effects_summary=effects_summary,
         params_summary=summarize_params(params),
+        outcome=outcome,
+        error=error,
     )
 
 

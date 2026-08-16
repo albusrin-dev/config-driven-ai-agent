@@ -113,11 +113,21 @@ class UserConfig(StrictModel):
 # SystemConfig
 # --------------------------------------------------------------------------
 
+class PricingConfig(StrictModel):
+    """Optional provider pricing, consumed by the cost budget. If absent,
+    the cost cap is inactive (never fabricated) — token/tool-call caps
+    still apply."""
+
+    input_usd_per_mtok: float = Field(ge=0)
+    output_usd_per_mtok: float = Field(ge=0)
+
+
 class ProviderConfig(StrictModel):
     endpoint: str | None = None
     # NAME of the env var holding the key — never the key itself
     # (Durable Rule 4). May be omitted for a keyless local provider.
     api_key_env: str | None = None
+    pricing: PricingConfig | None = None
 
 
 class LimitsConfig(StrictModel):

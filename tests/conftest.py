@@ -52,10 +52,15 @@ def make_system(
     fs_root=None,
     denied_paths=(),
     max_autonomy: Autonomy = Autonomy.AUTONOMOUS_BOUNDED,
+    limits: dict | None = None,
+    pricing: dict | None = None,
 ) -> SystemConfig:
+    provider: dict = {"endpoint": "http://localhost:1"}
+    if pricing is not None:
+        provider["pricing"] = pricing
     return SystemConfig(
-        providers={"local": {"endpoint": "http://localhost:1"}},
-        limits={"max_autonomy": max_autonomy},
+        providers={"local": provider},
+        limits={"max_autonomy": max_autonomy, **(limits or {})},
         sandbox={
             "fs_root": str(fs_root) if fs_root is not None else None,
             "denied_paths": [str(d) for d in denied_paths],

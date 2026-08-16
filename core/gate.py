@@ -46,6 +46,10 @@ class GateDecision:
     decision: Decision
     reason: str
     effects_summary: tuple[str, ...] = ()
+    # The blessed effect objects, computed ONCE in evaluate(). The
+    # enforcement wrapper threads these into execute so check time and use
+    # time share a single path resolution (A1 / TOCTOU).
+    effects: tuple[Effect, ...] = ()
 
 
 def _check_filesystem_effect(effect: FilesystemEffect, sandbox: SandboxConfig) -> str | None:
@@ -85,21 +89,24 @@ class PolicyGate:
                 f"tool '{tool.name}' is not in the agent's allowlist",
             )
 
-        # 2. Caps / effects.
+        # 2. Caps / effects. plan_effects runs ONCE; the resulting blessed
+        # effect objects ride along in the decision so execution uses the
+        # exact paths that were confined here (A1 / TOCTOU).
         context = ToolContext(agent=agent_config, system=system_config)
-        effects: list[Effect] = tool.plan_effects(params, context)
-        summary = tuple(describe(e) for e in effects)
-        for effect in effects:
+        blessed = tuple(tool.plan_effects(params, context))
+        summary = tuple(describe(e) for e in blessed)
+        for effect in blessed:
             if isinstance(effect, FilesystemEffect):
                 problem = _check_filesystem_effect(effect, system_config.sandbox)
                 if problem is not None:
-                    return GateDecision(Decision.DENY, problem, summary)
+                    return GateDecision(Decision.DENY, problem, summary, blessed)
             else:
                 return GateDecision(
                     Decision.DENY,
                     f"unrecognised effect type '{type(effect).__name__}' — "
                     f"denied (fail-closed)",
                     summary,
+                    blessed,
                 )
 
         # 3a. Destructive floor — nothing can lower this.
@@ -109,6 +116,7 @@ class PolicyGate:
                 f"tool '{tool.name}' is destructive: confirmation is always "
                 f"required (floor; overrides and autonomy cannot lower it)",
                 summary,
+                blessed,
             )
 
         # 3b. Per-tool override.
@@ -118,12 +126,14 @@ class PolicyGate:
                 Decision.REQUIRE_CONFIRMATION,
                 f"per-tool override confirm=always for '{tool.name}'",
                 summary,
+                blessed,
             )
         if override is not None and override.confirm is Confirm.NEVER:
             return GateDecision(
                 Decision.ALLOW,
                 f"per-tool override confirm=never for '{tool.name}'",
                 summary,
+                blessed,
             )
 
         # 3c. Autonomy table (base need).
@@ -135,11 +145,13 @@ class PolicyGate:
                     "autonomy 'assisted' requires confirmation for every "
                     "action, including reads",
                     summary,
+                    blessed,
                 )
             return GateDecision(
                 Decision.ALLOW,
                 f"read action auto-allowed at autonomy '{autonomy.value}'",
                 summary,
+                blessed,
             )
         if autonomy is Autonomy.AUTONOMOUS_BOUNDED:
             return GateDecision(
@@ -147,10 +159,12 @@ class PolicyGate:
                 "non-destructive mutation auto-allowed at autonomy "
                 "'autonomous_bounded'",
                 summary,
+                blessed,
             )
         return GateDecision(
             Decision.REQUIRE_CONFIRMATION,
             f"mutating action requires confirmation at autonomy "
             f"'{autonomy.value}'",
             summary,
+            blessed,
         )

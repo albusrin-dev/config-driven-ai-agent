@@ -68,9 +68,15 @@ class Tool(ABC):
     @abstractmethod
     def plan_effects(self, params: BaseModel, context: ToolContext) -> list[Effect]:
         """Declare the effects this specific call will have. Pure; no IO
-        beyond path resolution; must not perform the action."""
+        beyond path resolution; must not perform the action. Path
+        resolution happens HERE, once — the resolved path rides in the
+        effect and is the only one execution may touch."""
 
     @abstractmethod
-    def execute(self, params: BaseModel, context: ToolContext) -> ToolResult:
+    def execute(
+        self, params: BaseModel, context: ToolContext, effects: list[Effect]
+    ) -> ToolResult:
         """Do the work. Assumes already authorised — no permission checks
-        here, ever."""
+        here, ever. ``effects`` are the gate-blessed effect objects from
+        plan_effects: operate on the paths they carry and never re-derive
+        a path from the raw params (A1 / TOCTOU)."""

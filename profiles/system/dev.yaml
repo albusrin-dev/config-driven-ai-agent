@@ -5,9 +5,14 @@ env: dev
 providers:
   anthropic:
     api_key_env: ANTHROPIC_API_KEY
+    # Used by the cost budget. USD per million tokens; adjust to the
+    # model actually configured.
+    pricing:
+      input_usd_per_mtok: 3.0
+      output_usd_per_mtok: 15.0
   local:
     endpoint: http://localhost:11434
-    # keyless local provider: no api_key_env
+    # keyless local provider: no api_key_env; no pricing -> cost cap inactive
 
 limits:
   max_autonomy: supervised
@@ -16,7 +21,10 @@ limits:
   max_tool_calls_per_session: 50
 
 sandbox:
-  fs_root: null
+  # Relative fs_root resolves against the process working directory —
+  # run the CLI from the repo root. Still a confined sandbox: everything
+  # outside it is denied by the gate.
+  fs_root: workspace
   denied_paths: []
   command_deny_patterns: []
   egress_allowlist: []   # empty = deny-all once enforcement lands

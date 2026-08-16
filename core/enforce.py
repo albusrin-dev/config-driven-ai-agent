@@ -78,22 +78,39 @@ def enforce_and_run(
     # 2. The gate is the only place a permission decision is made.
     decision = PolicyGate().evaluate(tool, validated, agent_config, system_config)
 
-    # 3. Audit every decision (redacted).
-    audit.emit(
-        audit.make_record(
-            agent_name=agent_config.name,
-            tool_name=tool.name,
-            decision=decision.decision.value,
-            reason=decision.reason,
-            effects_summary=decision.effects_summary,
-            params=validated,
+    def _emit(outcome: str | None = None, error: str | None = None) -> None:
+        # 3. One audit record per decision (redacted); executed actions
+        # carry an outcome status (A2).
+        audit.emit(
+            audit.make_record(
+                agent_name=agent_config.name,
+                tool_name=tool.name,
+                decision=decision.decision.value,
+                reason=decision.reason,
+                effects_summary=decision.effects_summary,
+                params=validated,
+                outcome=outcome,
+                error=error,
+            )
         )
-    )
 
     # 4-6. Act on the decision.
     if decision.decision is Decision.DENY:
+        _emit()
         return Denied(decision.reason)
     if decision.decision is Decision.REQUIRE_CONFIRMATION:
         if approver is None or not approver(decision):
+            _emit()
             return Pending(decision.reason)
-    return Executed(tool.execute(validated, context))
+    # Execute with the gate-blessed effects — check time and use time share
+    # one path resolution (A1). A raising tool becomes an error result so
+    # the failure is audited and surfaced instead of escaping the chokepoint.
+    try:
+        result = tool.execute(validated, context, list(decision.effects))
+    except Exception as e:
+        result = ToolResult(ok=False, error=f"{type(e).__name__}: {e}")
+    _emit(
+        outcome="ok" if result.ok else "error",
+        error=None if result.ok else result.error,
+    )
+    return Executed(result)
