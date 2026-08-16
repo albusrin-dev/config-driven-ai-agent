@@ -23,9 +23,11 @@ no separate retry machinery exists.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
+from .base import ToolContext
 from .enforce import Denied, Executed, Pending, enforce_and_run
 from .errors import ToolParamError, UnknownToolError
 from .llm import LLMPort, ToolCall, estimate_cost
@@ -48,6 +50,20 @@ ITERATION_CEILING = 25
 OUTPUT_RESERVE_TOKENS = 4_096
 
 Approver = Callable[["GateDecision"], bool]
+
+# URLs the USER typed. Trailing punctuation is stripped so "see https://x/y."
+# yields the URL without the sentence's full stop.
+_URL_RE = re.compile(r"https?://[^\s<>\"'`\\]+", re.IGNORECASE)
+
+
+def harvest_urls(text: str) -> list[str]:
+    """URLs appearing in a user message (Rule 13 provenance: 'user').
+
+    Only ever applied to the USER'S OWN message — never to tool results,
+    whose content is untrusted (Rule 12) and must not be able to grant
+    provenance to an exfiltration target.
+    """
+    return [match.group(0).rstrip(".,;:!?)]}'\"") for match in _URL_RE.finditer(text or "")]
 
 
 # --------------------------------------------------------------------------
@@ -162,10 +178,19 @@ def _process_calls(
             _append_tool_result(session, call.id, f"action refused: {e}", ok=False)
             continue
 
+        # Built per call so a search earlier in the same batch grants
+        # provenance to its results for a fetch later in the batch.
+        context = ToolContext(
+            agent=agent_config,
+            system=system_config,
+            user_urls=frozenset(session.user_urls),
+            search_urls=frozenset(session.search_urls),
+        )
         recording = _RecordingApprover(approver) if approver is not None else None
         try:
             outcome = enforce_and_run(
-                tool, call.params, agent_config, system_config, approver=recording
+                tool, call.params, agent_config, system_config,
+                context=context, approver=recording,
             )
         except ToolParamError as e:
             _append_tool_result(session, call.id, f"invalid parameters: {e}", ok=False)
@@ -199,6 +224,10 @@ def _process_calls(
         else:  # Executed
             session.budget.tool_calls_made += 1
             result = outcome.result
+            # URLs from a trusted STRUCTURED source (search results) gain
+            # 'search' provenance. Tools returning fetched content never
+            # populate this, so hostile page text cannot whitelist itself.
+            session.search_urls.update(result.discovered_urls)
             content = str(result.output) if result.ok else f"tool error: {result.error}"
             _append_tool_result(session, call.id, content, ok=result.ok)
     return None
@@ -347,6 +376,8 @@ def run_turn(
             "session is awaiting approval of a pending action; "
             "call resume() instead of run_turn()"
         )
+    # URLs the user typed are provenance-approved for fetching (Rule 13).
+    session.user_urls.update(harvest_urls(user_message))
     session.conversation.append({"role": "user", "content": user_message})
     session.status = "running"
     session.budget.iterations = 0  # the ceiling is per run; resume continues the same run

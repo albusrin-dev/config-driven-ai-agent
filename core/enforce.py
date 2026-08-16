@@ -75,8 +75,12 @@ def enforce_and_run(
     if context is None:
         context = ToolContext(agent=agent_config, system=system_config)
 
-    # 2. The gate is the only place a permission decision is made.
-    decision = PolicyGate().evaluate(tool, validated, agent_config, system_config)
+    # 2. The gate is the only place a permission decision is made. It gets
+    # the same context execution will use, so provenance and path checks are
+    # made against the state the call actually runs with.
+    decision = PolicyGate().evaluate(
+        tool, validated, agent_config, system_config, context
+    )
 
     def _emit(outcome: str | None = None, error: str | None = None) -> None:
         # 3. One audit record per decision (redacted); executed actions

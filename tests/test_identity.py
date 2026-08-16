@@ -67,7 +67,7 @@ def test_two_profiles_yield_distinct_identities(system_config, anthropic_key):
     assert "structured summaries" in prompt_r
     # Capability summary tracks each profile's actual allowlist.
     assert "calendar.read" in prompt_j
-    assert "web.search" in prompt_r and "web.search" not in prompt_j
+    assert "web_search" in prompt_r and "web_search" not in prompt_j
 
 
 # --- Capability summary matches enforcement --------------------------------

@@ -28,11 +28,23 @@ if TYPE_CHECKING:
 class ToolContext:
     """Passed to effect-planning and execution.
 
-    Minimal by design: the active configs only. No session, no secrets.
+    Minimal by design: the active configs, plus the URL provenance index the
+    gate needs for Rule 13. Still no session object and no secrets.
+
+    ``user_urls`` came from the user's own message; ``search_urls`` came from
+    a search provider's STRUCTURED results. Nothing else may enter these
+    sets — URLs appearing inside fetched page text are hostile-by-default
+    and must never grant themselves provenance.
     """
 
     agent: AgentConfig
     system: SystemConfig
+    user_urls: frozenset[str] = frozenset()
+    search_urls: frozenset[str] = frozenset()
+
+    @property
+    def known_urls(self) -> frozenset[str]:
+        return self.user_urls | self.search_urls
 
 
 @dataclass(frozen=True)
@@ -40,6 +52,12 @@ class ToolResult:
     ok: bool
     output: Any = None
     error: str | None = None
+    # URLs a tool obtained from a TRUSTED STRUCTURED source (a search
+    # provider's result list). The loop adds these to the session's
+    # search-provenance set. A tool that returns fetched CONTENT must never
+    # populate this — that would let an injected page whitelist its own
+    # exfiltration target.
+    discovered_urls: tuple[str, ...] = ()
 
 
 class Tool(ABC):

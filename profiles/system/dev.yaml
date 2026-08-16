@@ -14,6 +14,15 @@ providers:
     endpoint: http://localhost:11434
     # keyless local provider: no api_key_env; no pricing -> cost cap inactive
 
+# Search provider (Phase 6). SearXNG is self-hosted and needs no API key;
+# point endpoint at your instance (JSON format enabled in its settings.yml).
+# This endpoint is the ONE internal address web_search may reach — web_fetch
+# may never reach an internal address at all (Rule 13).
+search:
+  provider_name: searxng
+  endpoint: http://localhost:8080
+  max_results: 8
+
 limits:
   max_autonomy: supervised
   max_tokens_per_session: 100000

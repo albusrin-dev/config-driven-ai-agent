@@ -66,4 +66,13 @@ def resolve_secrets(agent: AgentConfig, system: SystemConfig) -> Secrets:
         if not os.environ.get(provider.api_key_env):
             raise MissingSecretError(provider_name, provider.api_key_env)
         references[provider_name] = provider.api_key_env
+
+    # A keyed search provider (Phase 6) follows the same rule: presence
+    # validated at load, value read on demand at request time. SearXNG needs
+    # no key, so the default path adds nothing.
+    search = system.search
+    if search is not None and search.api_key_env is not None:
+        if not os.environ.get(search.api_key_env):
+            raise MissingSecretError(search.provider_name, search.api_key_env)
+        references[search.provider_name] = search.api_key_env
     return Secrets(references)

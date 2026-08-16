@@ -173,6 +173,29 @@ class ProviderConfig(StrictModel):
     pricing: PricingConfig | None = None
 
 
+class SearchProviderConfig(StrictModel):
+    """The one configured search provider (Rule 7: a port arrives with the
+    second provider, not before).
+
+    Default is SearXNG — self-hosted, open-source, no API key. A keyed
+    provider names its env var in ``api_key_env``; the value is resolved on
+    demand at request time via ``Secrets``, exactly like the LLM key, and is
+    never stored, never in the model's context, never in a dump.
+    """
+
+    provider_name: str = "searxng"
+    endpoint: str = Field(min_length=1)
+    api_key_env: str | None = None
+    # SearXNG returns ~20 results/page and has no API-side cap, so the tool
+    # slices to a sane count itself.
+    max_results: int = Field(default=8, gt=0)
+
+    def domain(self) -> str:
+        from core.netguard import url_domain
+
+        return url_domain(self.endpoint)
+
+
 class LimitsConfig(StrictModel):
     max_autonomy: Autonomy = Autonomy.SUPERVISED
     max_tokens_per_session: int = Field(default=100_000, gt=0)
@@ -184,7 +207,11 @@ class SandboxConfig(StrictModel):
     fs_root: str | None = None
     denied_paths: list[str] = Field(default_factory=list)
     command_deny_patterns: list[str] = Field(default_factory=list)
-    # Empty = deny-all when enforcement lands (fail-closed).
+    # Phase 6 refinement (deliberate, see CLAUDE.md): for READ-ONLY,
+    # provenance-gated fetches, empty = no additional domain restriction;
+    # non-empty = strict mode (fetches must also be to an allowlisted
+    # domain). The fail-closed empty-means-deny rule is retained exactly
+    # where the threat is — any future DATA-CARRYING egress.
     egress_allowlist: list[str] = Field(default_factory=list)
 
 
@@ -193,3 +220,4 @@ class SystemConfig(StrictModel):
     providers: dict[str, ProviderConfig]
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
+    search: SearchProviderConfig | None = None

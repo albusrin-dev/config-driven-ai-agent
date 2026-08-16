@@ -55,6 +55,11 @@ class Session(_Strict):
     # part of ``conversation`` — stored history stays pure (Rule 11).
     system_prompt: str = ""
     conversation: list[dict[str, Any]] = Field(default_factory=list)
+    # URL provenance (Rule 13), serializable session state: URLs the user
+    # pasted, and URLs returned by search providers' structured results.
+    # A URL in neither set is model-composed and hits the confirmation floor.
+    user_urls: set[str] = Field(default_factory=set)
+    search_urls: set[str] = Field(default_factory=set)
     budget: BudgetState = Field(default_factory=BudgetState)
     status: Status = "idle"
     pending_action: PendingAction | None = None

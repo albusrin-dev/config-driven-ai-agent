@@ -1,5 +1,10 @@
 # Agent profile: jarvis
 # Declarative data only — no logic, no secrets (see CLAUDE.md rules 1 & 4).
+# ILLUSTRATIVE profile: the tools below (calendar/email/notes) have no
+# implementations yet, so the registry cross-check refuses to run this
+# agent — by design (Rule 3: the allowlist is the single source of truth,
+# and an entry with no registered tool is a loud error, not a silent skip).
+# Runnable profiles today: 'scribe' (files/documents), 'researcher' (web).
 name: jarvis
 version: 1
 description: Personal assistant profile for the owner.

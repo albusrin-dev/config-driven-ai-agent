@@ -29,6 +29,7 @@ from core.paths import (
     open_no_follow_read_bytes,
     resolve_real,
 )
+from core.text import accumulate_capped, truncation_marker
 
 # Extraction bounds — constants, not config (one big file must not blow
 # the context budget; the derived budget from Phase 4 assumes bounded
@@ -77,32 +78,8 @@ def _check_size(target: Path, tool_name: str) -> ToolResult | None:
     return None
 
 
-def _accumulate(pieces, cap: int) -> tuple[str, bool, int]:
-    """Join text pieces until ``cap`` chars; stop DURING extraction.
-
-    Returns (text, truncated, pieces_consumed).
-    """
-    parts: list[str] = []
-    total = 0
-    consumed = 0
-    truncated = False
-    for piece in pieces:
-        consumed += 1
-        if not piece:
-            continue
-        room = cap - total
-        if room <= 0:
-            truncated = True
-            consumed -= 1
-            break
-        if len(piece) > room:
-            parts.append(piece[:room])
-            total += room
-            truncated = True
-            break
-        parts.append(piece)
-        total += len(piece)
-    return "\n".join(parts), truncated, consumed
+# Truncation lives in core.text so documents and web share one size guard.
+_accumulate = accumulate_capped
 
 
 class ReadPdfTool(Tool):
@@ -144,9 +121,8 @@ class ReadPdfTool(Tool):
             if not text.strip():
                 return ToolResult(ok=True, output=SCANNED_PDF_MESSAGE)
             if truncated:
-                text += (
-                    f"\n[document truncated: showing first {len(text)} "
-                    f"characters from {pages_used} of {n_pages} pages]"
+                text += truncation_marker(
+                    "document", len(text), f" from {pages_used} of {n_pages} pages"
                 )
             return ToolResult(ok=True, output=text)
         except (OSError, PathResolutionChangedError) as e:
@@ -198,9 +174,8 @@ class ReadDocxTool(Tool):
                 blocks = list(_docx_blocks(document))
             text, truncated, blocks_used = _accumulate(blocks, MAX_EXTRACT_CHARS)
             if truncated:
-                text += (
-                    f"\n[document truncated: showing first {len(text)} "
-                    f"characters from {blocks_used} of {len(blocks)} blocks]"
+                text += truncation_marker(
+                    "document", len(text), f" from {blocks_used} of {len(blocks)} blocks"
                 )
             return ToolResult(ok=True, output=text)
         except (OSError, PathResolutionChangedError) as e:

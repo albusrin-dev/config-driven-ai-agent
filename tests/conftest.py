@@ -54,6 +54,8 @@ def make_system(
     max_autonomy: Autonomy = Autonomy.AUTONOMOUS_BOUNDED,
     limits: dict | None = None,
     pricing: dict | None = None,
+    egress_allowlist=(),
+    search: dict | None = None,
 ) -> SystemConfig:
     provider: dict = {"endpoint": "http://localhost:1"}
     if pricing is not None:
@@ -64,5 +66,7 @@ def make_system(
         sandbox={
             "fs_root": str(fs_root) if fs_root is not None else None,
             "denied_paths": [str(d) for d in denied_paths],
+            "egress_allowlist": list(egress_allowlist),
         },
+        search=search,
     )

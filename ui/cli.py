@@ -26,6 +26,7 @@ from memory import adapter_for
 from tools.registry import ToolRegistry
 from tools.builtins.documents import ReadDocxTool, ReadPdfTool
 from tools.builtins.files import DeleteFileTool, ReadFileTool, WriteFileTool
+from tools.builtins.web import WebFetchTool, WebSearchTool
 
 InputFn = Callable[[str], str]
 PrintFn = Callable[[str], None]
@@ -38,6 +39,8 @@ def build_registry() -> ToolRegistry:
     registry.register(DeleteFileTool())
     registry.register(ReadPdfTool())
     registry.register(ReadDocxTool())
+    registry.register(WebSearchTool())
+    registry.register(WebFetchTool())
     return registry
 
 

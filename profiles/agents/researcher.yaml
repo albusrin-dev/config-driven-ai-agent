@@ -25,9 +25,12 @@ llm:
 
 tools:
   allowlist:
-    - web.search
-    - web.fetch
+    - web_search
+    - web_fetch
     - read_pdf
     - read_docx
+    - read_file
 
-autonomy: assisted
+# Supervised while web use is young: reads auto-run, but the provenance
+# floor still fires on any URL the model composes itself (Rule 13).
+autonomy: supervised
