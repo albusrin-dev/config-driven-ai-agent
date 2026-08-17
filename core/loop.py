@@ -27,6 +27,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
+from .activity import ActivityEvent, ActivitySink, emit as emit_activity
 from .base import ToolContext
 from .enforce import Denied, Executed, Pending, enforce_and_run
 from .errors import ToolParamError, UnknownToolError
@@ -154,6 +155,7 @@ def _process_calls(
     agent_config: AgentConfig,
     system_config: SystemConfig,
     approver: Approver | None,
+    on_activity: ActivitySink | None = None,
 ) -> TurnResult | None:
     """Run a batch of model-requested tool calls through the chokepoint.
 
@@ -186,6 +188,7 @@ def _process_calls(
             user_urls=frozenset(session.user_urls),
             search_urls=frozenset(session.search_urls),
         )
+        emit_activity(on_activity, ActivityEvent("tool_start", tool=call.name))
         recording = _RecordingApprover(approver) if approver is not None else None
         try:
             outcome = enforce_and_run(
@@ -197,6 +200,8 @@ def _process_calls(
             continue
 
         if isinstance(outcome, Denied):
+            emit_activity(on_activity, ActivityEvent(
+                "tool_end", tool=call.name, detail="refused", ok=False))
             _append_tool_result(
                 session, call.id, f"action refused: {outcome.reason}", ok=False
             )
@@ -220,10 +225,15 @@ def _process_calls(
                     ],
                 )
                 session.status = "awaiting_approval"
+                emit_activity(on_activity, ActivityEvent(
+                    "awaiting", tool=call.name, detail=outcome.reason))
                 return Suspended(session.pending_action)
         else:  # Executed
             session.budget.tool_calls_made += 1
             result = outcome.result
+            emit_activity(on_activity, ActivityEvent(
+                "tool_end", tool=call.name,
+                detail="done" if result.ok else "failed", ok=result.ok))
             # URLs from a trusted STRUCTURED source (search results) gain
             # 'search' provenance. Tools returning fetched content never
             # populate this, so hostile page text cannot whitelist itself.
@@ -301,6 +311,7 @@ def _drive(
     system_config: SystemConfig,
     approver: Approver | None,
     memory: MemoryPort | None = None,
+    on_activity: ActivitySink | None = None,
 ) -> TurnResult:
     pricing = system_config.providers[agent_config.llm.provider].pricing
     if pricing is None:
@@ -326,6 +337,7 @@ def _drive(
             session.status = "error"
             return Errored(f"context assembly failed: {e}")
 
+        emit_activity(on_activity, ActivityEvent("thinking"))
         try:
             response = llm.complete(messages, schemas)
         except Exception as e:
@@ -355,7 +367,7 @@ def _drive(
 
         result = _process_calls(
             session, list(response.tool_calls), registry, agent_config,
-            system_config, approver,
+            system_config, approver, on_activity,
         )
         if result is not None:
             return result
@@ -370,6 +382,7 @@ def run_turn(
     system_config: SystemConfig,
     approver: Approver | None = None,
     memory: MemoryPort | None = None,
+    on_activity: ActivitySink | None = None,
 ) -> TurnResult:
     if session.status == "awaiting_approval":
         return Errored(
@@ -381,7 +394,8 @@ def run_turn(
     session.conversation.append({"role": "user", "content": user_message})
     session.status = "running"
     session.budget.iterations = 0  # the ceiling is per run; resume continues the same run
-    return _drive(session, llm, registry, agent_config, system_config, approver, memory)
+    return _drive(session, llm, registry, agent_config, system_config, approver,
+                  memory, on_activity)
 
 
 def resume(
@@ -393,6 +407,7 @@ def resume(
     system_config: SystemConfig,
     approver: Approver | None = None,
     memory: MemoryPort | None = None,
+    on_activity: ActivitySink | None = None,
 ) -> TurnResult:
     """Continue a suspended run after a human decision on the pending action."""
     if session.status != "awaiting_approval" or session.pending_action is None:
@@ -411,7 +426,7 @@ def resume(
         # still deny it.
         result = _process_calls(
             session, [call], registry, agent_config, system_config,
-            approver=lambda decision: True,
+            approver=lambda decision: True, on_activity=on_activity,
         )
         if result is not None:
             return result
@@ -422,8 +437,10 @@ def resume(
         )
 
     result = _process_calls(
-        session, remaining, registry, agent_config, system_config, approver
+        session, remaining, registry, agent_config, system_config, approver,
+        on_activity,
     )
     if result is not None:
         return result
-    return _drive(session, llm, registry, agent_config, system_config, approver, memory)
+    return _drive(session, llm, registry, agent_config, system_config, approver,
+                  memory, on_activity)

@@ -9,12 +9,18 @@ dependencies = [
     # Document extraction (Phase 5) — the first third-party parsing deps.
     "pypdf~=6.16",
     "python-docx~=1.2",
+    # Local web console (Phase 7) — loopback only, no auth.
+    "fastapi~=0.141",
+    "uvicorn~=0.52",
+    "websockets~=17.0",
+    "python-multipart~=0.0.32",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "python-dotenv>=1.0",
+    "httpx>=0.27",  # fastapi.testclient
 ]
 
 [tool.pytest.ini_options]

@@ -1,6 +1,10 @@
 """Thin CLI driver: read input -> run a turn -> print output -> prompt
-inline for confirmations. A client of the core; holds no policy, no loop
-logic, no provider knowledge beyond constructing the adapter.
+inline for confirmations.
+
+A client of ``AgentService`` — session lifecycle and the suspend/resume
+cycle live there now, shared with the web UI, so the two clients cannot
+drift. The CLI's own contribution is what it always was: a terminal
+approver that asks the human directly (Rule 9).
 
 Usage: python -m ui.cli <agent-name> [--env ENV]
 """
@@ -10,38 +14,13 @@ from __future__ import annotations
 import argparse
 from typing import Callable
 
-from config.loader import LoadedConfig, load_agent, load_system_config
-from core.identity import build_system_prompt
-from core.loop import (
-    BudgetExceeded,
-    Completed,
-    Errored,
-    Suspended,
-    resume,
-    run_turn,
-)
-from core.session import new_session
-from llm.anthropic import AnthropicAdapter
-from memory import adapter_for
-from tools.registry import ToolRegistry
-from tools.builtins.documents import ReadDocxTool, ReadPdfTool
-from tools.builtins.files import DeleteFileTool, ReadFileTool, WriteFileTool
-from tools.builtins.web import WebFetchTool, WebSearchTool
+from runtime import AgentService
+from tools.defaults import build_registry
 
 InputFn = Callable[[str], str]
 PrintFn = Callable[[str], None]
 
-
-def build_registry() -> ToolRegistry:
-    registry = ToolRegistry()
-    registry.register(ReadFileTool())
-    registry.register(WriteFileTool())
-    registry.register(DeleteFileTool())
-    registry.register(ReadPdfTool())
-    registry.register(ReadDocxTool())
-    registry.register(WebSearchTool())
-    registry.register(WebFetchTool())
-    return registry
+__all__ = ["build_registry", "make_cli_approver", "run_cli", "main"]
 
 
 def make_cli_approver(input_fn: InputFn, print_fn: PrintFn):
@@ -58,23 +37,28 @@ def make_cli_approver(input_fn: InputFn, print_fn: PrintFn):
     return approver
 
 
+def _print_activity(print_fn: PrintFn):
+    def sink(event) -> None:
+        if event.kind == "tool_start":
+            print_fn(f"  … {event.tool}")
+
+    return sink
+
+
 def run_cli(
-    loaded: LoadedConfig,
-    llm,
-    registry: ToolRegistry,
-    memory=None,
+    service: AgentService,
+    agent_name: str,
     input_fn: InputFn = input,
     print_fn: PrintFn = print,
 ) -> None:
-    session = new_session(
-        loaded.agent.name,
-        system_prompt=build_system_prompt(loaded.agent, loaded.user),
-    )
+    session_id = service.start_session(agent_name)
+    session = service.session(session_id)
     approver = make_cli_approver(input_fn, print_fn)
-    if memory is None:
-        memory = adapter_for(loaded.agent.memory.strategy)
-    print_fn(f"agent '{loaded.agent.name}' ready (autonomy: "
-             f"{loaded.agent.autonomy.value}). 'exit' or blank line to quit.")
+    on_activity = _print_activity(print_fn)
+
+    print_fn(f"agent '{service.agent_name(session_id)}' ready (autonomy: "
+             f"{service.status(session_id)['autonomy']}). "
+             f"'exit' or blank line to quit.")
 
     while True:
         try:
@@ -84,32 +68,30 @@ def run_cli(
         if not line.strip() or line.strip().lower() == "exit":
             break
 
-        result = run_turn(session, line, llm, registry,
-                          loaded.agent, loaded.system, approver=approver,
-                          memory=memory)
+        update = service.send(session_id, line, on_activity=on_activity,
+                              approver=approver)
         # With an inline approver, suspension is rare (e.g. piped stdin
         # closing); handle it anyway so the CLI can never dead-end.
-        while isinstance(result, Suspended):
-            answer = input_fn(
-                f"[pending] {result.pending.reason} — approve? [y/N] "
+        while update.status == "awaiting_approval":
+            answer = input_fn(f"[pending] {update.pending.reason} — approve? [y/N] ")
+            update = service.resolve_pending(
+                session_id, answer.strip().lower() in ("y", "yes"),
+                on_activity=on_activity, approver=approver,
             )
-            result = resume(session, answer.strip().lower() in ("y", "yes"),
-                            llm, registry, loaded.agent, loaded.system,
-                            approver=approver, memory=memory)
 
-        if isinstance(result, Completed):
-            print_fn(result.text)
-        elif isinstance(result, BudgetExceeded):
-            print_fn(f"[stopped: '{result.which}' budget exhausted]")
+        if update.status == "completed":
+            print_fn(update.text)
+        elif update.status == "budget_exceeded":
+            print_fn(f"[stopped: {update.detail}]")
             break
-        elif isinstance(result, Errored):
-            print_fn(f"[error] {result.reason}")
+        elif update.status == "error":
+            print_fn(f"[error] {update.detail}")
             break
 
+    budget = service.status(session_id)["budget"]
     print_fn(
-        f"[session {session.status}: tokens={session.budget.tokens_used}, "
-        f"tool_calls={session.budget.tool_calls_made}, "
-        f"cost=${session.budget.cost_used:.4f}]"
+        f"[session {session.status}: tokens={budget['tokens']}, "
+        f"tool_calls={budget['tool_calls']}, cost=${budget['cost_usd']:.4f}]"
     )
 
 
@@ -120,19 +102,8 @@ def main(argv: list[str] | None = None) -> None:
                         help="environment name (default: APP_ENV or 'dev')")
     args = parser.parse_args(argv)
 
-    system = load_system_config(args.env)
-    loaded = load_agent(args.agent, system)
-    provider = system.providers[loaded.agent.llm.provider]
-    # No constructor system prompt: identity now arrives per call as the
-    # session's assembled prompt (a system-role message the adapter hoists).
-    llm = AnthropicAdapter(
-        provider_name=loaded.agent.llm.provider,
-        model=loaded.agent.llm.model,
-        secrets=loaded.secrets,
-        temperature=loaded.agent.llm.temperature,
-        endpoint=provider.endpoint,
-    )
-    run_cli(loaded, llm, build_registry())
+    service = AgentService(env=args.env, registry=build_registry())
+    run_cli(service, args.agent)
 
 
 if __name__ == "__main__":

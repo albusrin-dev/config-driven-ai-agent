@@ -215,9 +215,22 @@ class SandboxConfig(StrictModel):
     egress_allowlist: list[str] = Field(default_factory=list)
 
 
+class ServerConfig(StrictModel):
+    """Local web console settings.
+
+    Port only — there is deliberately NO host field. The bind address is a
+    constant in ``server/app.py`` (loopback), so no configuration mistake
+    can put the console on a network. Exposing it is a hosting decision,
+    with its own phase and its own authentication.
+    """
+
+    port: int = Field(default=8765, gt=0, le=65535)
+
+
 class SystemConfig(StrictModel):
     env: Env = Env.DEV
     providers: dict[str, ProviderConfig]
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     search: SearchProviderConfig | None = None
+    server: ServerConfig = Field(default_factory=ServerConfig)

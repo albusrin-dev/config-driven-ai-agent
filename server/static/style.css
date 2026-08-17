@@ -1,0 +1,426 @@
+/* Countersign — the agent proposes, a person signs.
+   Three rules hold this together:
+   1. Anything the machine asserts (paths, URLs, tool names, numbers) is set
+      in mono. Anything a person or the agent says is set in prose.
+   2. Colour carries the gate's verdicts and nothing else: ochre = waiting on
+      you, pine = approved, oxblood = denied.
+   3. One bold moment — the stamp. Everything around it stays quiet. */
+
+:root {
+  --ink:        #151E26;
+  --ink-soft:   #56636D;
+  --ground:     #D8DDE0;
+  --surface:    #FFFFFF;
+  --rule:       #B7C0C6;
+
+  --hold:       #8A5A0B;   /* awaiting your decision */
+  --hold-wash:  #F7EBD4;
+  --clear:      #1B5744;   /* approved */
+  --seal:       #7E2433;   /* denied */
+
+  --signage: Bahnschrift, "DIN Alternate", "DIN Condensed", "Arial Narrow",
+             "Helvetica Neue Condensed", sans-serif;
+  --prose: "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, Roboto,
+           "Helvetica Neue", sans-serif;
+  --machine: "Cascadia Mono", Consolas, "SF Mono", Menlo, "Liberation Mono",
+             monospace;
+
+  --column: 40rem;
+  --step: 0.75rem;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--prose);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* ── Console bar ─────────────────────────────────────────────────────── */
+
+.console-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 0.7rem clamp(1rem, 4vw, 2.5rem);
+  background: var(--ink);
+  color: #E9EDEF;
+  border-bottom: 3px solid var(--ink);
+}
+
+.console-bar__identity {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+/* A ruled square: the mark of a stamp before it is pressed. */
+.mark {
+  width: 1.1rem; height: 1.1rem;
+  border: 2px solid var(--hold);
+  box-shadow: inset 0 0 0 2px var(--ink), inset 0 0 0 3px var(--hold);
+  flex: none;
+}
+
+.field { display: flex; align-items: baseline; gap: 0.5rem; }
+
+.field__label,
+.meter dt {
+  font-family: var(--signage);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #8D9BA5;
+}
+
+.picker {
+  font-family: var(--signage);
+  font-size: 1.05rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #FFFFFF;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid var(--hold);
+  padding: 0.1rem 1.4rem 0.1rem 0.1rem;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, #E9EDEF 50%),
+                    linear-gradient(135deg, #E9EDEF 50%, transparent 50%);
+  background-position: right 0.5rem center, right 0.25rem center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+.picker option { color: var(--ink); background: #FFFFFF; }
+
+.standing {
+  margin: 0;
+  font-family: var(--machine);
+  font-size: 0.76rem;
+  color: #8D9BA5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meter { display: flex; gap: 1.4rem; margin: 0; }
+.meter__cell { display: flex; flex-direction: column; align-items: flex-end; }
+.meter dd {
+  margin: 0;
+  font-family: var(--machine);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: #E9EDEF;
+}
+
+/* ── The record ──────────────────────────────────────────────────────── */
+
+.record {
+  flex: 1;
+  overflow-y: auto;
+  padding: clamp(1.5rem, 5vw, 3rem) 1rem 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.6rem;
+}
+
+.record > * { width: min(var(--column), 100%); }
+
+.opening { padding-top: clamp(1rem, 8vh, 5rem); }
+.opening__eyebrow {
+  font-family: var(--signage);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 0.75rem;
+  color: var(--hold);
+  margin: 0 0 0.9rem;
+}
+.opening__title {
+  font-family: var(--signage);
+  font-size: clamp(2.6rem, 7vw, 4rem);
+  line-height: 0.95;
+  letter-spacing: 0.005em;
+  font-weight: 600;
+  margin: 0 0 1.1rem;
+}
+.opening__body {
+  margin: 0;
+  max-width: 34rem;
+  color: var(--ink-soft);
+}
+
+/* Turns. The person's words sit in a card; the agent's are typeset plainly,
+   so the transcript reads as a document rather than a chat log. */
+
+.turn__label {
+  font-family: var(--signage);
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  margin: 0 0 0.35rem;
+}
+
+.turn--you .turn__body {
+  background: var(--surface);
+  border-left: 3px solid var(--ink);
+  padding: 0.75rem 1rem;
+}
+
+.turn--agent .turn__body { padding-left: 0.05rem; }
+.turn__body p { margin: 0 0 0.7rem; }
+.turn__body p:last-child { margin-bottom: 0; }
+.turn__body ul { margin: 0 0 0.7rem; padding-left: 1.1rem; }
+.turn__body code {
+  font-family: var(--machine);
+  font-size: 0.88em;
+  background: #C9D1D5;
+  padding: 0.05em 0.3em;
+}
+
+.note {
+  font-family: var(--machine);
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  padding: 0.5rem 0;
+  margin: 0;
+}
+.note--bad { color: var(--seal); border-color: var(--seal); }
+
+/* ── The countersignature card: the one loud thing ───────────────────── */
+
+.warrant {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--ink);
+  border-left: 6px solid var(--hold);
+  padding: 1rem 1.15rem 1.15rem;
+}
+
+.warrant__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  font-family: var(--signage);
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.74rem;
+  color: var(--hold);
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 0.55rem;
+  margin-bottom: 0.8rem;
+}
+.warrant__tool { font-family: var(--machine); letter-spacing: 0; color: var(--ink); }
+
+.warrant__ask {
+  margin: 0 0 0.3rem;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+/* The gate's own words, kept verbatim as the record of why it stopped. */
+.warrant__reason {
+  margin: 0 0 0.9rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.warrant__facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 0.8rem;
+  margin: 0 0 1.1rem;
+  padding: 0.7rem 0.8rem;
+  background: #F1F3F4;
+  border: 1px solid var(--rule);
+  font-family: var(--machine);
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+.warrant__facts dt {
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  padding-top: 0.12rem;
+}
+.warrant__facts dd { margin: 0; white-space: pre-wrap; }
+
+.warrant__choice { display: flex; gap: 0.6rem; }
+
+.button {
+  font-family: var(--signage);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.9rem;
+  padding: 0.55rem 1.3rem;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.button:hover { background: var(--ink); color: var(--surface); }
+.button--approve { border-color: var(--clear); color: var(--clear); }
+.button--approve:hover { background: var(--clear); color: var(--surface); }
+.button--deny { border-color: var(--seal); color: var(--seal); }
+.button--deny:hover { background: var(--seal); color: var(--surface); }
+.button[disabled] { opacity: 0.4; cursor: default; }
+.button--send {
+  background: var(--ink);
+  color: var(--surface);
+  padding: 0.6rem 1.5rem;
+}
+.button--send:hover { background: var(--hold); border-color: var(--hold); }
+
+/* Resolved: the card quietens and takes its stamp. */
+.warrant--settled { border-left-color: var(--rule); color: var(--ink-soft); }
+.warrant--settled .warrant__head { color: var(--ink-soft); }
+.warrant--settled .warrant__choice { display: none; }
+
+/* Takes the place the buttons occupied: the decision is recorded exactly
+   where it was made, and it can never sit on top of the facts. */
+.stamp {
+  align-self: flex-end;
+  font-family: var(--signage);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 1.1rem;
+  padding: 0.25rem 0.7rem;
+  margin-top: 0.1rem;
+  border: 3px double currentColor;
+  opacity: 0.85;
+  transform: rotate(-7deg);
+  /* No fill-mode: the resting style above must stand on its own. If the
+     animation never advances (background tab, throttled renderer), the
+     stamp still sits correctly instead of freezing at its entrance size. */
+  animation: press 220ms cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+.stamp--approved { color: var(--clear); }
+.stamp--denied { color: var(--seal); }
+
+@keyframes press {
+  from { transform: rotate(-7deg) scale(1.7); opacity: 0; }
+  to   { transform: rotate(-7deg) scale(1); opacity: 0.85; }
+}
+
+/* ── Desk (activity + composer) ──────────────────────────────────────── */
+
+.desk {
+  border-top: 1px solid var(--rule);
+  background: var(--ground);
+  padding: 0.6rem clamp(1rem, 4vw, 2.5rem) 1rem;
+}
+
+.activity {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0 auto 0.55rem;
+  width: min(var(--column), 100%);
+  font-family: var(--machine);
+  font-size: 0.82rem;
+  color: var(--hold);
+}
+.activity__pip {
+  width: 0.55rem; height: 0.55rem;
+  background: var(--hold);
+  animation: blink 1s steps(2, end) infinite;
+}
+@keyframes blink { 50% { opacity: 0.25; } }
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+  width: min(var(--column), 100%);
+  margin: 0 auto;
+}
+
+.composer__attach {
+  display: grid;
+  place-items: center;
+  width: 2.7rem; height: 2.7rem;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  flex: none;
+}
+.composer__attach:hover { border-color: var(--ink); }
+.composer__attach:focus-within { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+.composer__input {
+  flex: 1;
+  font: inherit;
+  font-family: var(--prose);
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  color: var(--ink);
+  resize: none;
+  max-height: 9rem;
+}
+.composer__input:focus { outline: 2px solid var(--ink); outline-offset: -1px; border-color: var(--ink); }
+
+/* ── Drop veil ───────────────────────────────────────────────────────── */
+
+.dropveil {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(21, 30, 38, 0.82);
+  z-index: 10;
+}
+.dropveil p {
+  font-family: var(--signage);
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: #FFFFFF;
+  border: 2px dashed var(--hold);
+  padding: 2rem 3rem;
+}
+
+/* ── Responsive & motion ─────────────────────────────────────────────── */
+
+@media (max-width: 620px) {
+  .console-bar { flex-wrap: wrap; gap: 0.6rem 1rem; }
+  .standing { display: none; }
+  .meter { gap: 1rem; }
+  .opening__title { font-size: 2.4rem; }
+  .warrant__facts { grid-template-columns: 1fr; gap: 0.15rem; }
+  .warrant__facts dt { padding-top: 0.4rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}

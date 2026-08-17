@@ -31,11 +31,15 @@ untrusted data. Phase 6 (this codebase today) adds the web, read-only:
 `web_search` (SearXNG by default, no API key) and `web_fetch`, gated by a
 new `NetworkEffect` under Rule 13 — internal-target (SSRF) floor,
 provenance floor, then the egress model — with bounded timeouts/retries and
-capped page text. No web writing, no data-carrying egress, no browser
+capped page text. Phase 7 (this codebase today) gives it a face: a thin
+`AgentService` in `runtime/` shared by both clients, step-level activity
+events from the loop, and a loopback-only web console (FastAPI +
+vanilla front end) with chat, an agent picker, drag-and-drop upload, and
+Approve/Deny cards. No web writing, no data-carrying egress, no browser
 automation or JS rendering, no OCR, no document writing, no spreadsheets,
 no persistent / cross-session memory, no retrieval, no LLM summarization,
-no shell tools, no planning, no events, voice, workflows, skills, MCP, or
-rich UI until their phases arrive.
+no shell tools, no planning, no events, voice, workflows, skills, MCP,
+accounts, multi-user, or hosting until their phases arrive.
 
 ## Durable Project Rules (all phases)
 
@@ -170,6 +174,24 @@ rich UI until their phases arrive.
   an allowlisted domain. The fail-closed empty-⇒-deny rule is retained
   exactly where the threat is: any future DATA-CARRYING egress (POST, or
   model-composed data-bearing URLs), which is not built.
+- Web console (Phase 7): `python -m server.app` serves it at
+  `http://127.0.0.1:8765`. It is a CLIENT of `runtime.AgentService` and
+  grants no new power — every action still goes through the same loop and
+  the same gate, and the Approve/Deny buttons are the human's answer to a
+  gate question, delivered as `resolve_pending` → `resume`. The browser
+  gets no approver of its own, so an unapproved action stays suspended
+  (the Phase 2 headless path, with buttons). **The bind host is a constant
+  in `server/app.py`, not a config field** — `ServerConfig` has only a
+  port, so no setting can move the console onto a network. There is no
+  authentication: the loopback boundary IS the control, which is exactly
+  why hosting is a separate track (accounts, isolation, who pays for
+  usage). Uploads are sandbox writes — sanitized name, type allowlist,
+  size cap, then `core.paths.confine`. Front end is vanilla (no build
+  step); a framework rewrite and token-level streaming are noted upgrades.
+- Layering note: `runtime/` is the composition root (config + registry +
+  LLM + memory + loop). It exists so `core` keeps importing nothing
+  outward — putting the service in `core` would have forced `core` →
+  `tools`/`memory`, breaking the graph held since Phase 1.
 - CI: `.github/workflows/ci.yml` (ubuntu + windows). Ubuntu runs the three
   POSIX no-follow tests and `scripts/verify_posix_nofollow.py`; green
   Linux CI is the gate for any capability-expanding phase. Activates when

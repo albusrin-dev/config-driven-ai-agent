@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent console</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header class="console-bar">
+  <div class="console-bar__identity">
+    <span class="mark" aria-hidden="true"></span>
+    <label class="field">
+      <span class="field__label">Agent</span>
+      <select id="agent-picker" class="picker"></select>
+    </label>
+    <p class="standing" id="standing">Loading agents…</p>
+  </div>
+
+  <dl class="meter" id="meter" aria-label="Session usage">
+    <div class="meter__cell"><dt>Tokens</dt><dd id="meter-tokens">0</dd></div>
+    <div class="meter__cell"><dt>Actions</dt><dd id="meter-calls">0</dd></div>
+    <div class="meter__cell"><dt>Cost</dt><dd id="meter-cost">$0.0000</dd></div>
+  </dl>
+</header>
+
+<main class="record" id="record" aria-live="polite">
+  <section class="opening" id="opening">
+    <p class="opening__eyebrow">Local console</p>
+    <h1 class="opening__title">The agent asks<br>before it acts.</h1>
+    <p class="opening__body">
+      Give it a task in plain language. It reads and writes only inside its own
+      folder, and anything consequential — deleting a file, opening a link it
+      chose itself — stops here for your signature first.
+    </p>
+  </section>
+</main>
+
+<div class="dropveil" id="dropveil" hidden>
+  <p>Release to add this file to the agent's folder</p>
+</div>
+
+<footer class="desk">
+  <p class="activity" id="activity" aria-live="polite" hidden>
+    <span class="activity__pip" aria-hidden="true"></span>
+    <span id="activity-text"></span>
+  </p>
+
+  <form class="composer" id="composer">
+    <label class="composer__attach" title="Add a document">
+      <input type="file" id="file-input" accept=".txt,.md,.pdf,.docx" hidden>
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <span class="sr-only">Add a document</span>
+    </label>
+    <textarea id="input" class="composer__input" rows="1"
+              placeholder="Ask the agent to do something…"
+              autocomplete="off"></textarea>
+    <button type="submit" class="button button--send" id="send">Send</button>
+  </form>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>
