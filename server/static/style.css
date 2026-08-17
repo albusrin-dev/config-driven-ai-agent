@@ -393,14 +393,24 @@ body {
 
 /* ── Drop veil ───────────────────────────────────────────────────────── */
 
+/* Hidden is the resting state, and it is stated HERE. A bare
+   `display: grid` on this class silently outranks the browser's
+   `[hidden] { display: none }`, which pins the veil over the whole page and
+   swallows every click — so the visible state is scoped to :not([hidden]).
+   `pointer-events: none` is the second line of defence: this element is an
+   indicator, so even if something ever leaves it on screen it can never
+   intercept a click. */
 .dropveil {
   position: fixed;
   inset: 0;
-  display: grid;
+  display: none;
   place-items: center;
   background: rgba(21, 30, 38, 0.82);
   z-index: 10;
+  pointer-events: none;
 }
+
+.dropveil:not([hidden]) { display: grid; }
 .dropveil p {
   font-family: var(--signage);
   text-transform: uppercase;

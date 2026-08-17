@@ -308,22 +308,56 @@ el.file.addEventListener("change", () => {
   el.file.value = "";
 });
 
+/* The veil is shown only while files are actually over the window.
+   dragenter/dragleave fire for every element the pointer crosses, so a
+   depth counter tracks the window as a whole — and both handlers apply the
+   same "is this a file drag?" test, or the counter drifts and the veil
+   strands. Several endings (Esc, dropping outside, tabbing away) fire no
+   leave at all, so those are caught explicitly. */
 let dragDepth = 0;
-window.addEventListener("dragenter", (e) => {
-  if (![...e.dataTransfer.types].includes("Files")) return;
+
+function draggingFiles(event) {
+  const data = event.dataTransfer;
+  if (!data) return false;
+  if (data.types && Array.from(data.types).includes("Files")) return true;
+  return data.items && Array.from(data.items).some((item) => item.kind === "file");
+}
+
+function showVeil(visible) {
+  if (!visible) dragDepth = 0;
+  el.veil.hidden = !visible;
+}
+
+window.addEventListener("dragenter", (event) => {
+  if (!draggingFiles(event)) return;
   dragDepth += 1;
-  el.veil.hidden = false;
+  showVeil(true);
 });
-window.addEventListener("dragover", (e) => e.preventDefault());
-window.addEventListener("dragleave", () => {
+
+window.addEventListener("dragover", (event) => {
+  if (!draggingFiles(event)) return;
+  event.preventDefault();  // required, or the browser refuses the drop
+  event.dataTransfer.dropEffect = "copy";
+});
+
+window.addEventListener("dragleave", (event) => {
+  if (!draggingFiles(event)) return;
   dragDepth = Math.max(0, dragDepth - 1);
-  if (!dragDepth) el.veil.hidden = true;
+  if (dragDepth === 0) showVeil(false);
 });
-window.addEventListener("drop", (e) => {
-  e.preventDefault();
-  dragDepth = 0;
-  el.veil.hidden = true;
-  for (const file of e.dataTransfer.files) upload(file);
+
+window.addEventListener("drop", (event) => {
+  event.preventDefault();
+  showVeil(false);
+  if (!event.dataTransfer) return;
+  for (const file of event.dataTransfer.files) upload(file);
+});
+
+// Endings that fire no dragleave.
+window.addEventListener("dragend", () => showVeil(false));
+window.addEventListener("blur", () => showVeil(false));
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) showVeil(false);
 });
 
 loadAgents();

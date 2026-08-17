@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -38,6 +38,46 @@ BIND_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+class _RevalidatingStatic(StaticFiles):
+    """Serve the console's assets with `Cache-Control: no-cache`.
+
+    Not "don't cache" — "check with me first". The browser keeps the file
+    and revalidates, so it stays cheap, but an edited stylesheet or script
+    always takes effect on the next refresh.
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+def _asset_version() -> str:
+    """Newest mtime across the front-end assets, as a cache key."""
+    stamps = [
+        int(path.stat().st_mtime)
+        for path in (STATIC_DIR / "app.js", STATIC_DIR / "style.css")
+        if path.is_file()
+    ]
+    return str(max(stamps)) if stamps else "0"
+
+
+def render_console_page() -> str:
+    """index.html with version-stamped asset links.
+
+    Headers cannot dislodge a copy a browser has already cached, so the URL
+    itself changes when a file changes. This is what makes an edit show up
+    on a plain refresh instead of stranding someone on an old page — the
+    failure mode that hid the drop-veil bug behind "it does it even after
+    reloading".
+    """
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    version = _asset_version()
+    return (html
+            .replace('href="/style.css"', f'href="/style.css?v={version}"')
+            .replace('src="/app.js"', f'src="/app.js?v={version}"'))
 
 
 class StartSessionRequest(BaseModel):
@@ -233,7 +273,15 @@ def create_app(service: AgentService | None = None) -> FastAPI:
         return JSONResponse(status_code=404, content={"detail": "No such session."})
 
     if STATIC_DIR.is_dir():
-        app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+        # Registered before the mount so it wins for the page itself; the
+        # mount still serves the assets it points at.
+        @app.get("/", include_in_schema=False)
+        def console_page() -> HTMLResponse:
+            return HTMLResponse(
+                render_console_page(), headers={"Cache-Control": "no-store"}
+            )
+
+        app.mount("/", _RevalidatingStatic(directory=STATIC_DIR, html=True), name="static")
     return app
 
 
